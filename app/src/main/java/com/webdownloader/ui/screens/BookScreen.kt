@@ -69,7 +69,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.io.File
 
-private enum class BookDialog { QUALITY, RECOMPRESS, RENAME, DELETE_BOOK, DELETE_DOWNLOADS }
+private enum class BookDialog { QUALITY, RENAME, DELETE_BOOK, DELETE_DOWNLOADS }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -141,7 +141,6 @@ fun BookScreen(
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             DropdownMenuItem(text = { Text("Check for new chapters") }, onClick = { menu = false; checkForUpdates() })
                             DropdownMenuItem(text = { Text("Quality for this book") }, onClick = { menu = false; dialog = BookDialog.QUALITY })
-                            DropdownMenuItem(text = { Text("Re-compress downloads") }, onClick = { menu = false; dialog = BookDialog.RECOMPRESS })
                             DropdownMenuItem(text = { Text("Open source page") }, onClick = { menu = false; onOpenUrl(b.sourceUrl) })
                             DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; dialog = BookDialog.RENAME })
                             DropdownMenuItem(text = { Text("Delete all downloads") }, onClick = { menu = false; dialog = BookDialog.DELETE_DOWNLOADS })
@@ -236,25 +235,6 @@ fun BookScreen(
             label = { it?.let(::qualityDescription) ?: "Use default (${settings.defaultQuality.label})" },
             onDismiss = { dialog = null },
             onSelect = { q -> scope.launch { c.bookDao.update(b.copy(qualityOverride = q)) }; dialog = null },
-        )
-        BookDialog.RECOMPRESS -> ChoiceDialog(
-            title = "Re-compress ${downloaded.size} chapter(s)",
-            options = Quality.entries.filter { it != Quality.ORIGINAL },
-            selected = null,
-            label = ::qualityDescription,
-            onDismiss = { dialog = null },
-            onSelect = { q ->
-                c.downloads.recompress(b.id, q)
-                scope.launch { snackbar.showSnackbar("Re-compressing in the background") }
-                dialog = null
-            },
-            footer = {
-                Text(
-                    "Pages are re-encoded in place. The originals can't be restored, except by downloading again.",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            },
         )
         BookDialog.RENAME -> {
             var name by remember { mutableStateOf(b.title) }

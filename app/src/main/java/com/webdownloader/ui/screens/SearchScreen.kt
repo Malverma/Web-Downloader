@@ -1,5 +1,15 @@
 package com.webdownloader.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -103,66 +113,87 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
         if (nearEnd && s.hasMore) search.loadMore()
     }
 
-    ScreenScaffold(topBar = { TopAppBar(title = { Text("Search") }) }) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            OutlinedTextField(
-                value = s.text,
-                onValueChange = search::setText,
-                singleLine = true,
-                placeholder = { Text("Search all sites") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                trailingIcon = {
-                    if (s.text.isNotEmpty()) {
-                        IconButton(onClick = { search.setText(""); search.search() }) { Icon(Icons.Default.Close, "Clear") }
+    // The header (title, search box, site and filter chips) slides away while scrolling down
+    // through results and comes back on any upward scroll or at the top.
+    var showHeader by remember { mutableStateOf(true) }
+    val headerScroll = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < -6f) showHeader = false else if (available.y > 6f) showHeader = true
+                return Offset.Zero
+            }
+        }
+    }
+    LaunchedEffect(grid) {
+        snapshotFlow { grid.firstVisibleItemIndex == 0 && grid.firstVisibleItemScrollOffset == 0 }
+            .collect { atTop -> if (atTop) showHeader = true }
+    }
+
+    ScreenScaffold(topBar = {}) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize().statusBarsPadding().nestedScroll(headerScroll)) {
+            AnimatedVisibility(visible = showHeader, enter = expandVertically(), exit = shrinkVertically()) {
+                Column {
+                    TopAppBar(title = { Text("Search") }, windowInsets = WindowInsets(0, 0, 0, 0))
+                    OutlinedTextField(
+                        value = s.text,
+                        onValueChange = search::setText,
+                        singleLine = true,
+                        placeholder = { Text("Search all sites") },
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        trailingIcon = {
+                            if (s.text.isNotEmpty()) {
+                                IconButton(onClick = { search.setText(""); search.search() }) { Icon(Icons.Default.Close, "Clear") }
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); search.search() }),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+
+                    // Sites
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        search.sources.forEach { src ->
+                            FilterChip(selected = src.id in s.sites, onClick = { search.toggleSite(src.id) }, label = { Text(src.name) })
+                        }
                     }
-                },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); search.search() }),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            )
 
-            // Sites
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                search.sources.forEach { src ->
-                    FilterChip(selected = src.id in s.sites, onClick = { search.toggleSite(src.id) }, label = { Text(src.name) })
-                }
-            }
+                    // Filters
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        val genreCount = s.genres.size + s.excludedGenres.size
+                        FilterChip(
+                            selected = genreCount > 0,
+                            onClick = { genreDialog = true },
+                            label = { Text(if (genreCount == 0) "Genres" else "Genres ($genreCount)") },
+                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
+                        )
+                        FilterChip(
+                            selected = s.completedOnly,
+                            onClick = { search.setCompletedOnly(!s.completedOnly) },
+                            label = { Text("Completed") },
+                            leadingIcon = if (s.completedOnly) ({ Icon(Icons.Default.Check, null) }) else null,
+                        )
+                        ChoiceChip(ratingOptions, s.minRating, search::setMinRating)
+                        ChoiceChip(chapterOptions, s.minChapters, search::setMinChapters)
+                        ChoiceChip(SearchSort.entries.map { it to "Sort: ${it.label}" }, s.sort, search::setSort)
+                    }
 
-            // Filters
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                val genreCount = s.genres.size + s.excludedGenres.size
-                FilterChip(
-                    selected = genreCount > 0,
-                    onClick = { genreDialog = true },
-                    label = { Text(if (genreCount == 0) "Genres" else "Genres ($genreCount)") },
-                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                )
-                FilterChip(
-                    selected = s.completedOnly,
-                    onClick = { search.setCompletedOnly(!s.completedOnly) },
-                    label = { Text("Completed") },
-                    leadingIcon = if (s.completedOnly) ({ Icon(Icons.Default.Check, null) }) else null,
-                )
-                ChoiceChip(ratingOptions, s.minRating, search::setMinRating)
-                ChoiceChip(chapterOptions, s.minChapters, search::setMinChapters)
-                ChoiceChip(SearchSort.entries.map { it to "Sort: ${it.label}" }, s.sort, search::setSort)
-            }
-
-            if (s.genres.isNotEmpty() || s.excludedGenres.isNotEmpty()) {
-                FlowRow(
-                    Modifier.padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    (s.genres.sorted() + s.excludedGenres.sorted()).forEach { key ->
-                        val name = s.genreOptions.firstOrNull { it.key == key }?.name ?: key
-                        // Tapping cycles the genre on (included → excluded → off), same as in the dialog.
-                        GenreChip(name, genreState(key, s.genres, s.excludedGenres)) { search.toggleGenre(key) }
+                    if (s.genres.isNotEmpty() || s.excludedGenres.isNotEmpty()) {
+                        FlowRow(
+                            Modifier.padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            (s.genres.sorted() + s.excludedGenres.sorted()).forEach { key ->
+                                val name = s.genreOptions.firstOrNull { it.key == key }?.name ?: key
+                                // Tapping cycles the genre on (included → excluded → off), same as in the dialog.
+                                GenreChip(name, genreState(key, s.genres, s.excludedGenres)) { search.toggleGenre(key) }
+                            }
+                        }
                     }
                 }
             }
