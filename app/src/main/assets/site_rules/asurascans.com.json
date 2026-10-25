@@ -1,0 +1,12 @@
+{
+  "host": "asurascans.com",
+  "seriesUrlPattern": "^https?://(www\\.)?asurascans\\.com/comics/[^/?#]+/?([?#].*)?$",
+  "chapterUrlPattern": "^https?://(www\\.)?asurascans\\.com/comics/[^/?#]+/chapter/[\\d.]+/?([?#].*)?$",
+  "chapterLinkSelector": "a[href*='/chapter/']",
+  "chapterNumberRegex": "/chapter/(\\d+(?:\\.\\d+)?)",
+  "titleSelector": "h1",
+  "coverSelector": "img[src*='/asura-images/covers/']",
+  "imageFilter": { "urlContains": "/asura-images/chapters/", "altRegex": "Page \\d+" },
+  "pageNumberFrom": { "alt": "Page (\\d+)" },
+  "requestDelayMs": 300
+}
