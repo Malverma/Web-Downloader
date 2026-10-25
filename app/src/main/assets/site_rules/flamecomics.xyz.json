@@ -6,5 +6,5 @@
   "titleSelector": "h1",
   "coverSelector": "img[src*='thumbnail']",
   "imageFilter": { "urlContains": "cdn.flamecomics.xyz/uploads/images/series/", "urlExcludes": "thumbnail|/_next/" },
-  "requestDelayMs": 300
+  "requestDelayMs": 100
 }

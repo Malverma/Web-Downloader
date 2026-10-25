@@ -2,7 +2,8 @@
 
 An Android app for downloading manga chapters, or entire series, from websites and reading them offline.
 
-- **Books**: open a manga's homepage in the built-in browser and tap **Add as Book**. You get the full chapter list and can pick which chapters to download (all, none, not downloaded, or a range with long-press).
+- **Books**: open a manga's homepage in the built-in browser and tap **Add as Book**. You get the full chapter list and can pick which chapters to download: tap rows, use All / None / Not downloaded, or **hold and drag** to select many at once (the list auto-scrolls at the edges).
+- **Downloads tab**: one folder per manga with its queued, active, failed and finished chapters, matching the folders on disk.
 - **Offline reader**: vertical continuous scroll, like the website. The end of each chapter has a **Next chapter** card, with optional auto-continue. Reading progress is saved.
 - **Quality**: Original / High (1600px) / Medium (1200px) / Low (900px) / Custom. Set it globally, per book, or per download. Existing downloads can be re-compressed later.
 - **Portable files**: each chapter is saved as a `.cbz` (with `ComicInfo.xml`) in `<Library>/<Book Title>/`. Other readers such as Mihon, Perfect Viewer and Kavita can open these files.
@@ -39,7 +40,7 @@ echo "sdk.dir=$HOME/Android/Sdk" > local.properties   # if ANDROID_HOME isn't se
 |---|---|
 | Detect | `assets/extract.js` runs in the WebView on every page. It finds chapter links (series page) or the ordered page images (chapter page). The page type controls the floating button. |
 | Chapter list | Links are deduplicated and sorted by chapter number, so dates and labels like `{S3 END}` don't affect order. |
-| Download | A background `WorkManager` job opens each chapter in a hidden WebView and scrolls it to trigger lazy loading. It collects the images, then downloads them with OkHttp using the browser's cookies and referer. |
+| Download | A background `WorkManager` job downloads 2 chapters at a time. For sites with a rule, it reads the page image URLs straight from the chapter HTML, which takes well under a second. Otherwise it falls back to a hidden WebView that scrolls the page to trigger lazy loading. Images are fetched with OkHttp using the browser's cookies and referer. |
 | Save | Each image is resized and re-encoded to the chosen quality, packed into a CBZ, and written to the library folder. |
 | Read | The reader unpacks the CBZ into cache and shows pages in a `LazyColumn`. Next/previous comes from the saved chapter order, so it works offline. |
 

@@ -1,7 +1,10 @@
 package com.webdownloader.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,13 +34,18 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.webdownloader.data.db.Chapter
 import com.webdownloader.data.db.ChapterStatus
@@ -52,6 +60,7 @@ import com.webdownloader.ui.ScreenScaffold
 import com.webdownloader.ui.qualityDescription
 import com.webdownloader.ui.rememberContainer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 private sealed interface PickerState {
@@ -73,7 +82,6 @@ fun PickerScreen(seriesUrl: String, selectUrl: String?, onBack: () -> Unit, onDo
     var state by remember { mutableStateOf<PickerState>(PickerState.Loading) }
     var reload by remember { mutableIntStateOf(0) }
     var selected by remember { mutableStateOf(setOf<String>()) }
-    var anchor by remember { mutableStateOf<Int?>(null) }
     var newestFirst by remember { mutableStateOf(false) }
     var quality by remember { mutableStateOf<Quality?>(null) }
     var qualityDialog by remember { mutableStateOf(false) }
@@ -108,6 +116,34 @@ fun PickerScreen(seriesUrl: String, selectUrl: String?, onBack: () -> Unit, onDo
     val ready = state as? PickerState.Ready
     val rows = ready?.chapters?.let { if (newestFirst) it.reversed() else it }.orEmpty()
 
+    val listState = rememberLazyListState()
+    val haptics = LocalHapticFeedback.current
+    var dragAnchor by remember { mutableStateOf<Int?>(null) }
+    var dragBase by remember { mutableStateOf(setOf<String>()) }
+    var dragSelecting by remember { mutableStateOf(true) }
+    var pointerY by remember { mutableFloatStateOf(0f) }
+    var autoScroll by remember { mutableFloatStateOf(0f) }
+
+    fun indexAt(y: Float): Int? =
+        listState.layoutInfo.visibleItemsInfo.firstOrNull { y.toInt() in it.offset until it.offset + it.size }?.index
+
+    fun applyDrag(current: Int) {
+        val a = dragAnchor ?: return
+        if (rows.isEmpty()) return
+        val range = rows.subList(minOf(a, current), maxOf(a, current) + 1).map { it.url }
+        selected = if (dragSelecting) dragBase + range else dragBase - range
+    }
+
+    // Scroll while the finger rests near the top or bottom edge during a drag.
+    LaunchedEffect(autoScroll) {
+        if (autoScroll == 0f) return@LaunchedEffect
+        while (isActive) {
+            listState.scrollBy(autoScroll)
+            indexAt(pointerY)?.let(::applyDrag)
+            withFrameNanos { }
+        }
+    }
+
     fun confirm(download: Boolean) {
         val r = ready ?: return
         saving = true
@@ -128,7 +164,7 @@ fun PickerScreen(seriesUrl: String, selectUrl: String?, onBack: () -> Unit, onDo
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
                     if (ready != null) {
-                        IconButton(onClick = { newestFirst = !newestFirst; anchor = null }) {
+                        IconButton(onClick = { newestFirst = !newestFirst }) {
                             Icon(Icons.Default.SwapVert, contentDescription = "Reverse order")
                         }
                     }
@@ -182,7 +218,7 @@ fun PickerScreen(seriesUrl: String, selectUrl: String?, onBack: () -> Unit, onDo
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "${s.chapters.size} chapters · long-press to select a range",
+                            "${s.chapters.size} chapters · hold and drag to select",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
@@ -190,25 +226,46 @@ fun PickerScreen(seriesUrl: String, selectUrl: String?, onBack: () -> Unit, onDo
                         AssistChip(onClick = { qualityDialog = true }, label = { Text("Quality: ${quality?.label ?: "-"}") })
                     }
                     HorizontalDivider()
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        itemsIndexed(rows, key = { _, ch -> ch.url }) { index, ch ->
+                    LazyColumn(
+                        state = listState,
+                        // While drag-selecting, the finger moves the selection, not the list (edges auto-scroll).
+                        userScrollEnabled = dragAnchor == null,
+                        modifier = Modifier.fillMaxSize().pointerInput(rows) {
+                            // Hold a row, then drag up/down to select (or deselect) every row passed over.
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { offset ->
+                                    val i = indexAt(offset.y) ?: return@detectDragGesturesAfterLongPress
+                                    dragAnchor = i
+                                    dragBase = selected
+                                    dragSelecting = rows[i].url !in selected
+                                    pointerY = offset.y
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    applyDrag(i)
+                                },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    pointerY = change.position.y
+                                    indexAt(pointerY)?.let(::applyDrag)
+                                    val edge = 72.dp.toPx()
+                                    val h = size.height.toFloat()
+                                    autoScroll = when {
+                                        pointerY < edge -> -((edge - pointerY) / edge).coerceIn(0.1f, 1f) * 30f
+                                        pointerY > h - edge -> ((pointerY - (h - edge)) / edge).coerceIn(0.1f, 1f) * 30f
+                                        else -> 0f
+                                    }
+                                },
+                                onDragEnd = { dragAnchor = null; autoScroll = 0f },
+                                onDragCancel = { dragAnchor = null; autoScroll = 0f },
+                            )
+                        },
+                    ) {
+                        itemsIndexed(rows, key = { _, ch -> ch.url }) { _, ch ->
                             val existing = s.existing[ch.url]
                             val checked = ch.url in selected
                             Row(
                                 Modifier
                                     .fillMaxWidth()
-                                    .combinedClickable(
-                                        onClick = {
-                                            selected = if (checked) selected - ch.url else selected + ch.url
-                                            anchor = index
-                                        },
-                                        onLongClick = {
-                                            val a = anchor ?: index
-                                            val range = rows.subList(minOf(a, index), maxOf(a, index) + 1).map { it.url }
-                                            selected = selected + range
-                                            anchor = index
-                                        },
-                                    )
+                                    .clickable { selected = if (checked) selected - ch.url else selected + ch.url }
                                     .padding(horizontal = 8.dp, vertical = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {

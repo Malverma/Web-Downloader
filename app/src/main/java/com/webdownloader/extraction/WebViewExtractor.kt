@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.view.View
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.coroutines.CompletableDeferred
@@ -13,8 +14,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.io.ByteArrayInputStream
 import java.io.IOException
 import kotlin.coroutines.resume
 
@@ -29,6 +32,10 @@ class WebViewExtractor(
     private val configure: (WebView) -> Unit,
 ) {
     enum class Mode { SERIES, CHAPTER }
+
+    private companion object {
+        val MEDIA_EXTENSIONS = listOf(".webp", ".jpg", ".jpeg", ".png", ".gif", ".avif", ".mp4", ".webm", ".woff", ".woff2", ".ttf")
+    }
 
     @Serializable
     private data class ScrollState(val y: Double = 0.0, val max: Double = 0.0)
@@ -56,7 +63,7 @@ class WebViewExtractor(
     private suspend fun scrollStep(webView: WebView): ScrollState {
         val raw = eval(
             webView,
-            """(function(){window.scrollBy(0, Math.max(400, window.innerHeight * 0.9));
+            """(function(){window.scrollBy(0, Math.max(1200, window.innerHeight * 2.5));
                var d = document.documentElement;
                return {y: window.scrollY, max: Math.max(d.scrollHeight, document.body ? document.body.scrollHeight : 0) - window.innerHeight};})()""",
         )
@@ -74,9 +81,20 @@ class WebViewExtractor(
         )
         webView.layout(0, 0, 1080, 2340)
         val loaded = CompletableDeferred<Unit>()
+        // With a rule that identifies page images by URL, the hidden WebView never needs
+        // the image bytes, so skip downloading them (and fonts/media) to load much faster.
+        val blockMedia = mode == Mode.CHAPTER && rules.forUrl(url)?.imageFilter?.urlContains != null
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, u: String?) {
                 loaded.complete(Unit)
+            }
+
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                if (!blockMedia || request.isForMainFrame) return null
+                val path = request.url.path.orEmpty().lowercase()
+                return if (MEDIA_EXTENSIONS.any { path.endsWith(it) }) {
+                    WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                } else null
             }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -88,7 +106,8 @@ class WebViewExtractor(
         try {
             withTimeout(timeoutMs) {
                 webView.loadUrl(url)
-                loaded.await()
+                // Don't wait for every ad and tracker: the DOM is usually ready well before onPageFinished.
+                withTimeoutOrNull(6_000) { loaded.await() }
                 var result = evaluate(webView, url)
                 repeat(20) {
                     if (!result.challenge) return@repeat
@@ -138,13 +157,19 @@ class WebViewExtractor(
         first: ExtractResult,
         onResult: (ExtractResult) -> Unit,
     ): ExtractResult {
+        // Most readers put every page in the DOM up front: if two quick checks agree, we're done.
+        if (first.images.isNotEmpty()) {
+            delay(700)
+            val again = evaluate(webView, url)
+            onResult(again)
+            if (again.images.size == first.images.size) return again
+        }
         var best = first
         var lastCount = -1
         var stable = 0
-        delay(800)
         repeat(240) { i ->
             val scroll = scrollStep(webView)
-            delay(300)
+            delay(150)
             val atBottom = scroll.y >= scroll.max - 10
             if (atBottom || i % 3 == 2) {
                 val now = evaluate(webView, url)

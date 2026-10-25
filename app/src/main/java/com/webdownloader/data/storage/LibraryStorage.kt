@@ -6,6 +6,8 @@ import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import com.webdownloader.data.prefs.SettingsRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -34,10 +36,19 @@ class LibraryStorage(private val context: Context, private val settings: Setting
         return Uri.parse(tree).lastPathSegment?.replace("primary:", "Internal storage/") ?: tree
     }
 
-    private suspend fun bookDir(folderName: String): DocumentFile {
+    /** Serializes folder lookup/creation: parallel chapter downloads would otherwise race to create it. */
+    private val dirLock = Mutex()
+
+    private suspend fun bookDir(folderName: String): DocumentFile = dirLock.withLock {
         val root = root()
-        return root.findFile(folderName)?.takeIf { it.isDirectory }
+        if (root.uri.scheme == "file") {
+            val dir = File(root.uri.path!!, folderName).apply { mkdirs() }
+            if (!dir.isDirectory) throw IOException("Cannot create folder \"$folderName\"")
+            return@withLock DocumentFile.fromFile(dir)
+        }
+        root.findFile(folderName)?.takeIf { it.isDirectory }
             ?: root.createDirectory(folderName)
+            ?: root.findFile(folderName)?.takeIf { it.isDirectory }
             ?: throw IOException("Cannot create folder \"$folderName\"")
     }
 

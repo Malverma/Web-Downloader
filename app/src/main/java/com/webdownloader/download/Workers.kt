@@ -21,7 +21,13 @@ import com.webdownloader.data.storage.Cbz
 import com.webdownloader.extraction.ChallengeException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import com.webdownloader.data.db.Chapter
+import java.util.concurrent.atomic.AtomicInteger
 import java.io.File
 
 private fun foregroundInfo(id: Int, notification: android.app.Notification): ForegroundInfo =
@@ -38,28 +44,42 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             setForeground(foregroundInfo(Notifications.ID_DOWNLOAD, Notifications.progress(ctx, "Downloads", "Preparing…", 0, 0)))
         }
         c.chapterDao.resetInterrupted()
-        while (true) {
-            if (c.settings.current().downloadsPaused) break
-            val chapter = c.chapterDao.nextQueued() ?: break
-            val book = c.bookDao.get(chapter.bookId)
-            val title = listOfNotNull(book?.title, chapter.label).joinToString(" · ")
-            runCatching {
-                setForeground(foregroundInfo(Notifications.ID_DOWNLOAD, Notifications.progress(ctx, title, "Finding pages…", 0, 0)))
-            }
-            try {
-                c.chapterDownloader.download(chapter.id) { done, total ->
-                    Notifications.notify(ctx, Notifications.ID_DOWNLOAD, Notifications.progress(ctx, title, "$done / $total pages", done, total))
+        val claimLock = Mutex()
+        val active = AtomicInteger(0)
+        // Several chapters download at once; the lock stops two loops claiming the same one.
+        suspend fun claim(): Chapter? = claimLock.withLock {
+            if (c.settings.current().downloadsPaused) return null
+            c.chapterDao.nextQueued()?.also { c.chapterDao.markDownloading(it.id) }
+        }
+        val lanes = c.settings.current().chapterConcurrency.coerceIn(1, 4)
+        coroutineScope {
+            repeat(lanes) {
+                launch {
+                    while (true) {
+                        val chapter = claim() ?: break
+                        val book = c.bookDao.get(chapter.bookId)
+                        val title = listOfNotNull(book?.title, chapter.label).joinToString(" · ")
+                        active.incrementAndGet()
+                        try {
+                            c.chapterDownloader.download(chapter.id) { done, total ->
+                                val others = active.get() - 1
+                                val text = "$done / $total pages" + if (others > 0) " · +$others more" else ""
+                                Notifications.notify(ctx, Notifications.ID_DOWNLOAD, Notifications.progress(ctx, title, text, done, total))
+                            }
+                        } catch (e: CancellationException) {
+                            withContext(NonCancellable) { c.chapterDao.requeueIfDownloading(chapter.id) }
+                            throw e
+                        } catch (e: ChallengeException) {
+                            c.chapterDao.requeueIfDownloading(chapter.id)
+                            c.settings.update { it.copy(downloadsPaused = true, pauseReason = e.message) }
+                            Notifications.alert(ctx, "Downloads paused", e.message.orEmpty())
+                        } catch (e: Exception) {
+                            c.chapterDao.fail(chapter.id, e.message ?: e.javaClass.simpleName)
+                        } finally {
+                            active.decrementAndGet()
+                        }
+                    }
                 }
-            } catch (e: CancellationException) {
-                withContext(NonCancellable) { c.chapterDao.requeueIfDownloading(chapter.id) }
-                throw e
-            } catch (e: ChallengeException) {
-                c.chapterDao.requeueIfDownloading(chapter.id)
-                c.settings.update { it.copy(downloadsPaused = true, pauseReason = e.message) }
-                Notifications.alert(ctx, "Downloads paused", e.message.orEmpty())
-                return Result.success()
-            } catch (e: Exception) {
-                c.chapterDao.fail(chapter.id, e.message ?: e.javaClass.simpleName)
             }
         }
         return Result.success()

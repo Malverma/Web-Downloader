@@ -153,7 +153,13 @@ fun AppRoot(sharedUrl: String?, onSharedUrlConsumed: () -> Unit) {
                         onReadOnline = { nav.openBrowser(it) },
                     )
                 }
-                composable("downloads") { DownloadsScreen(onOpenBrowser = { nav.openBrowser(it) }) }
+                composable("downloads") {
+                    DownloadsScreen(
+                        onOpenBrowser = { nav.openBrowser(it) },
+                        onRead = { nav.navigate("reader/$it") },
+                        onOpenBook = { nav.navigate("book/$it") },
+                    )
+                }
                 composable("settings") { SettingsScreen() }
             }
         }

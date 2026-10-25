@@ -8,5 +8,5 @@
   "coverSelector": "img[src*='/asura-images/covers/']",
   "imageFilter": { "urlContains": "/asura-images/chapters/", "altRegex": "Page \\d+" },
   "pageNumberFrom": { "alt": "Page (\\d+)" },
-  "requestDelayMs": 300
+  "requestDelayMs": 100
 }

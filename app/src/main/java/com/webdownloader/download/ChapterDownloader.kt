@@ -5,6 +5,7 @@ import com.webdownloader.data.db.ChapterStatus
 import com.webdownloader.data.db.Quality
 import com.webdownloader.data.storage.Cbz
 import com.webdownloader.extraction.ChallengeException
+import com.webdownloader.extraction.SiteRule
 import com.webdownloader.extraction.WebViewExtractor
 import com.webdownloader.net.HttpException
 import kotlinx.coroutines.CancellationException
@@ -15,9 +16,12 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import org.jsoup.parser.Parser
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
+
+private val IMAGE_URL = Regex("""https?://[^"'\s<>\\)]+?\.(?:webp|jpe?g|png|avif|gif)(?:\?[^"'\s<>\\)]*)?""", RegexOption.IGNORE_CASE)
 
 class ChapterDownloader(private val c: AppContainer) {
 
@@ -30,14 +34,16 @@ class ChapterDownloader(private val c: AppContainer) {
         val spec = quality.spec(settings)
 
         c.chapterDao.markDownloading(chapter.id)
-        val result = c.extractor.extract(chapter.url, WebViewExtractor.Mode.CHAPTER)
-        if (result.challenge) throw ChallengeException(book.sourceHost)
-        val images = result.images.map { it.url }.distinct()
+        val rule = c.siteRules.forUrl(chapter.url)
+        val images = fastImages(chapter.url, rule).ifEmpty {
+            val result = c.extractor.extract(chapter.url, WebViewExtractor.Mode.CHAPTER)
+            if (result.challenge) throw ChallengeException(book.sourceHost)
+            result.images.map { it.url }.distinct()
+        }
         if (images.isEmpty()) {
             throw IOException("No page images found. The site layout may have changed; check its rule in Settings → Sites.")
         }
 
-        val rule = c.siteRules.forUrl(chapter.url)
         val delayMs = (rule?.requestDelayMs ?: settings.requestDelayMs).toLong()
         val work = File(c.app.cacheDir, "dl/${chapter.id}").apply { mkdirs() }
         val pad = if (images.size >= 1000) 4 else 3
@@ -97,6 +103,31 @@ class ChapterDownloader(private val c: AppContainer) {
         cbz.delete()
         work.deleteRecursively()
         runCatching { c.library.writeBookJson(book.id) }
+    }
+
+    /**
+     * Fast path: read page image URLs straight from the chapter HTML (they're embedded in
+     * the markup or page data on most readers), skipping the hidden WebView entirely.
+     * Only used for sites whose rule says which URLs are page images.
+     */
+    private suspend fun fastImages(url: String, rule: SiteRule?): List<String> {
+        val filter = rule?.imageFilter ?: return emptyList()
+        val contains = filter.urlContains ?: return emptyList()
+        val html = try {
+            c.http.getText(url)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        val text = Parser.unescapeEntities(html, false)
+            .replace("\\u002F", "/").replace("\\u002f", "/").replace("\\/", "/")
+        val exclude = filter.urlExcludes?.let { runCatching { Regex(it, RegexOption.IGNORE_CASE) }.getOrNull() }
+        return IMAGE_URL.findAll(text)
+            .map { it.value }
+            .filter { contains in it && exclude?.containsMatchIn(it) != true }
+            .distinct()
+            .toList()
     }
 
     private suspend fun fetchWithRetry(url: String, referer: String, spec: QualitySpec): ImageProcessor.Processed {

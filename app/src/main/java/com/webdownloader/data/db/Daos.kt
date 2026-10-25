@@ -77,6 +77,13 @@ interface ChapterDao {
     )
     fun observeQueue(): Flow<List<QueueItem>>
 
+    @Query(
+        """SELECT c.*, b.title AS bookTitle FROM chapters c JOIN books b ON b.id = c.bookId
+           WHERE c.status != 'NOT_DOWNLOADED'
+           ORDER BY b.title COLLATE NOCASE, c.sortIndex"""
+    )
+    fun observeDownloads(): Flow<List<QueueItem>>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(chapters: List<Chapter>): List<Long>
 

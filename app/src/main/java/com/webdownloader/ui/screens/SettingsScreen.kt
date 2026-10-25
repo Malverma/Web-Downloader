@@ -102,7 +102,10 @@ fun SettingsScreen() {
             item { Section("Downloads") }
             item { SwitchSetting("Wi-Fi only", "Wait for an unmetered connection", s.wifiOnly) { v -> update { it.copy(wifiOnly = v) } } }
             item {
-                SliderSetting("Images at once", s.imageConcurrency, 1..6, 1, { "$it" }) { v -> update { it.copy(imageConcurrency = v) } }
+                SliderSetting("Chapters at once", s.chapterConcurrency, 1..4, 1, { "$it" }) { v -> update { it.copy(chapterConcurrency = v) } }
+            }
+            item {
+                SliderSetting("Images at once (per chapter)", s.imageConcurrency, 1..8, 1, { "$it" }) { v -> update { it.copy(imageConcurrency = v) } }
             }
             item {
                 SliderSetting("Delay between images", s.requestDelayMs, 0..2000, 100, { "$it ms" }) { v -> update { it.copy(requestDelayMs = v) } }
