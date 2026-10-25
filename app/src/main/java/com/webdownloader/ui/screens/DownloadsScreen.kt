@@ -1,5 +1,14 @@
 package com.webdownloader.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Downloading
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,11 +71,33 @@ fun DownloadsScreen(onOpenBrowser: (String) -> Unit, onRead: (Long) -> Unit, onO
     val all by remember { c.chapterDao.observeDownloads() }.collectAsState(initial = emptyList())
     val settings by c.settings.state.collectAsState()
     var menu by remember { mutableStateOf(false) }
+    val snackbar = remember { SnackbarHostState() }
     // Folders with active downloads start open; finished ones start closed.
     val expanded = remember { mutableStateMapOf<Long, Boolean>() }
 
-    val folders = all.groupBy { it.chapter.bookId }.values.toList()
     val activeCount = all.count { it.chapter.status == ChapterStatus.QUEUED || it.chapter.status == ChapterStatus.DOWNLOADING }
+    val downloadingNow = all.filter { it.chapter.status == ChapterStatus.DOWNLOADING }
+    // 1-based place in line for each queued chapter, in the order the worker takes them.
+    val queuePosition = all.filter { it.chapter.status == ChapterStatus.QUEUED }
+        .sortedWith(compareBy({ it.chapter.queuedAt ?: Long.MAX_VALUE }, { it.chapter.sortIndex }))
+        .mapIndexed { i, q -> q.chapter.id to i + 1 }.toMap()
+    // Inside each folder: downloading first, then the queue in order, then failed, then finished.
+    val folders = all.groupBy { it.chapter.bookId }.values.map { items ->
+        items.sortedWith(
+            compareBy<QueueItem>(
+                {
+                    when (it.chapter.status) {
+                        ChapterStatus.DOWNLOADING -> 0
+                        ChapterStatus.QUEUED -> 1
+                        ChapterStatus.FAILED -> 2
+                        else -> 3
+                    }
+                },
+                { queuePosition[it.chapter.id] ?: 0 },
+                { it.chapter.sortIndex },
+            ),
+        )
+    }
 
     ScreenScaffold(
         topBar = {
@@ -88,6 +119,17 @@ fun DownloadsScreen(onOpenBrowser: (String) -> Unit, onRead: (Long) -> Unit, onO
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Restart downloads") },
+                                leadingIcon = { Icon(Icons.Default.RestartAlt, null) },
+                                onClick = {
+                                    menu = false
+                                    scope.launch {
+                                        c.downloads.forceRestart()
+                                        snackbar.showSnackbar("Downloads restarted")
+                                    }
+                                },
+                            )
                             DropdownMenuItem(text = { Text("Retry failed") }, onClick = {
                                 menu = false
                                 scope.launch {
@@ -107,6 +149,7 @@ fun DownloadsScreen(onOpenBrowser: (String) -> Unit, onRead: (Long) -> Unit, onO
                 },
             )
         },
+        snackbarHost = snackbar,
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (settings.downloadsPaused) {
@@ -130,6 +173,8 @@ fun DownloadsScreen(onOpenBrowser: (String) -> Unit, onRead: (Long) -> Unit, onO
             if (folders.isEmpty()) {
                 EmptyState("No downloads yet", "Downloaded chapters appear here, in a folder for each manga.")
             } else {
+                // Pinned above the list so it stays in view however far the folders are scrolled.
+                if (downloadingNow.isNotEmpty()) NowDownloading(downloadingNow)
                 LazyColumn(Modifier.fillMaxSize()) {
                     folders.forEach { items ->
                         val bookId = items.first().chapter.bookId
@@ -142,7 +187,17 @@ fun DownloadsScreen(onOpenBrowser: (String) -> Unit, onRead: (Long) -> Unit, onO
                             items(items, key = { it.chapter.id }) { item ->
                                 DownloadRow(
                                     item,
-                                    onOpen = { if (item.chapter.status == ChapterStatus.DOWNLOADED) onRead(item.chapter.id) },
+                                    queuePosition = queuePosition[item.chapter.id],
+                                    onOpen = {
+                                        when (item.chapter.status) {
+                                            ChapterStatus.DOWNLOADED -> onRead(item.chapter.id)
+                                            ChapterStatus.QUEUED -> scope.launch {
+                                                c.chapterDao.moveToFront(item.chapter.id)
+                                                snackbar.showSnackbar("${item.chapter.label} will download next")
+                                            }
+                                            else -> Unit
+                                        }
+                                    },
                                     onRetry = { scope.launch { c.library.queue(listOf(item.chapter.id)) } },
                                     onRemove = {
                                         scope.launch {
@@ -193,19 +248,81 @@ private fun FolderHeader(items: List<QueueItem>, open: Boolean, onToggle: () -> 
     }
 }
 
+/** Everything downloading right now, across all manga, pinned above the folders. */
 @Composable
-private fun DownloadRow(item: QueueItem, onOpen: () -> Unit, onRetry: () -> Unit, onRemove: () -> Unit) {
+private fun NowDownloading(items: List<QueueItem>) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Downloading, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(
+                    "Now downloading",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            items.forEach { item ->
+                val ch = item.chapter
+                Column {
+                    Text(
+                        "${item.bookTitle} · ${ch.label}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (ch.progressTotal > 0) {
+                        LinearProgressIndicator(
+                            progress = { ch.progressDone.toFloat() / ch.progressTotal },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        )
+                    } else {
+                        LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadRow(item: QueueItem, queuePosition: Int?, onOpen: () -> Unit, onRetry: () -> Unit, onRemove: () -> Unit) {
     val ch = item.chapter
+    val downloading = ch.status == ChapterStatus.DOWNLOADING
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = 56.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        Modifier
+            .fillMaxWidth()
+            .background(if (downloading) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+            .clickable(onClick = onOpen)
+            .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Status marker: spinning while downloading, place in line while queued.
+        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+            when (ch.status) {
+                ChapterStatus.DOWNLOADING -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
+                ChapterStatus.QUEUED -> Text(
+                    "#${queuePosition ?: "–"}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> Unit
+            }
+        }
         Column(Modifier.weight(1f)) {
-            Text(ch.label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                ch.label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (downloading) MaterialTheme.colorScheme.primary else Color.Unspecified,
+            )
             when (ch.status) {
                 ChapterStatus.DOWNLOADING -> {
                     Text(
-                        if (ch.progressTotal > 0) "${ch.progressDone} / ${ch.progressTotal} pages" else "Finding pages…",
+                        if (ch.progressTotal > 0) "Downloading · ${ch.progressDone} / ${ch.progressTotal} pages" else "Downloading · finding pages…",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     if (ch.progressTotal > 0) {
@@ -218,7 +335,11 @@ private fun DownloadRow(item: QueueItem, onOpen: () -> Unit, onRetry: () -> Unit
                     }
                 }
                 ChapterStatus.FAILED -> Text(ch.error ?: "Failed", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                ChapterStatus.QUEUED -> Text("Queued", style = MaterialTheme.typography.bodySmall)
+                ChapterStatus.QUEUED -> Text(
+                    if (queuePosition == 1) "Queued · next up" else "Queued · tap to download next",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 else -> Text(
                     buildString {
                         ch.pageCount?.let { append("$it pages") }

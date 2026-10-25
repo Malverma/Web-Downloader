@@ -127,6 +127,13 @@ interface ChapterDao {
     @Query("UPDATE chapters SET status = 'QUEUED' WHERE status = 'DOWNLOADING'")
     suspend fun resetInterrupted()
 
+    /** Moves a queued chapter to the front of the queue, so it downloads next. */
+    @Query(
+        """UPDATE chapters SET queuedAt = (SELECT MIN(queuedAt) FROM chapters WHERE status = 'QUEUED') - 1
+           WHERE id = :id AND status = 'QUEUED'"""
+    )
+    suspend fun moveToFront(id: Long)
+
     @Query("UPDATE chapters SET status = 'NOT_DOWNLOADED', queuedAt = NULL, error = NULL WHERE status IN ('QUEUED', 'DOWNLOADING', 'FAILED')")
     suspend fun clearQueue()
 

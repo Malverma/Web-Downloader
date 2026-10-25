@@ -4,7 +4,7 @@ An Android app for downloading manga chapters, or entire series, from websites a
 
 - **Find manga**: use the **Search** tab (or share a link from Firefox). Tap a result to see its full chapter list and pick which chapters to download: tap rows, use All / None / Not downloaded, or **hold and drag** to select many at once (the list auto-scrolls at the edges).
 - **Library**: shows only manga you have downloaded. Opening one lists just its downloaded chapters, and chapters you have opened are shaded darker. **Download** opens the full chapter list to get more.
-- **Downloads tab**: one folder per manga with its queued, active, failed and finished chapters, matching the folders on disk.
+- **Downloads tab**: one folder per manga with its queued, active, failed and finished chapters, matching the folders on disk. A **Now downloading** card shows what's downloading right now; queued chapters show their place in line, and tapping one moves it to the front. If downloads ever freeze, **⋮ → Restart downloads** starts them fresh.
 - **Offline reader**: vertical continuous scroll, like the website. The end of each chapter has a **Next chapter** card, with optional auto-continue. Reading progress is saved. Buttons in the bottom-right auto-scroll down (speed set in Settings) and jump to the previous/next downloaded chapter. Very tall webtoon strips are shown in slices so they always render.
 - **Quality**: Original / High (1600px) / Medium (1200px) / Low (900px) / Custom. Set it globally, per book, or per download.
 - **Portable files**: each chapter is saved as a `.cbz` (with `ComicInfo.xml`) in `<Library>/<Book Title>/`. Other readers such as Mihon, Perfect Viewer and Kavita can open these files.

@@ -143,15 +143,16 @@ class DownloadScheduler(
     suspend fun enqueue() {
         val s = settings.current()
         if (s.downloadsPaused) return
-        val request = OneTimeWorkRequestBuilder<DownloadWorker>()
+        workManager.enqueueUniqueWork(WORK_DOWNLOADS, ExistingWorkPolicy.APPEND_OR_REPLACE, request(s.wifiOnly))
+    }
+
+    private fun request(wifiOnly: Boolean) = OneTimeWorkRequestBuilder<DownloadWorker>()
             .setConstraints(
                 Constraints.Builder()
-                    .setRequiredNetworkType(if (s.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
+                    .setRequiredNetworkType(if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
                     .build(),
             )
             .build()
-        workManager.enqueueUniqueWork(WORK_DOWNLOADS, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
-    }
 
     suspend fun pause() {
         settings.update { it.copy(downloadsPaused = true, pauseReason = null) }
@@ -166,6 +167,17 @@ class DownloadScheduler(
     suspend fun restart() {
         workManager.cancelUniqueWork(WORK_DOWNLOADS)
         enqueue()
+    }
+
+    /**
+     * For when downloads freeze: throws away the current worker (e.g. one stuck on a page
+     * that never loads), puts its chapters back in the queue, lifts any pause and starts fresh.
+     */
+    suspend fun forceRestart() {
+        workManager.cancelUniqueWork(WORK_DOWNLOADS)
+        chapterDao.resetInterrupted()
+        settings.update { it.copy(downloadsPaused = false, pauseReason = null) }
+        workManager.enqueueUniqueWork(WORK_DOWNLOADS, ExistingWorkPolicy.REPLACE, request(settings.current().wifiOnly))
     }
 
     fun stop() {
