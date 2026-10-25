@@ -36,6 +36,19 @@ data class SearchItem(
     val genres: Set<String>? = null,
 )
 
+/** What to search for; [excluded] and [completedOnly] are sent to sites that support them. */
+data class SearchQuery(
+    val text: String,
+    val genres: Set<String>,
+    val excluded: Set<String> = emptySet(),
+    val completedOnly: Boolean = false,
+)
+
+private val COMPLETED = setOf("completed", "complete", "finished")
+
+/** True when a site's status text means the work has ended. */
+fun isCompleted(status: String?) = status?.trim()?.lowercase() in COMPLETED
+
 data class SearchPage(val items: List<SearchItem>, val hasMore: Boolean, val note: String? = null)
 
 /** Genres are matched across sites by lowercase name. */
@@ -48,7 +61,7 @@ interface SearchSource {
     /** Genre display names this site supports. */
     suspend fun genres(): List<String>
 
-    suspend fun search(text: String, genres: Set<String>, page: Int): SearchPage
+    suspend fun search(query: SearchQuery, page: Int): SearchPage
 
     /** Genre keys for one series (read from its page), or null if unavailable. */
     suspend fun genresOf(url: String): Set<String>? = null
@@ -81,12 +94,15 @@ class AsuraSource(private val http: Http) : SearchSource {
 
     override suspend fun genres() = genreMap().values.map { it.first }
 
-    override suspend fun search(text: String, genres: Set<String>, page: Int): SearchPage {
+    override suspend fun search(query: SearchQuery, page: Int): SearchPage {
+        val text = query.text
+        val genres = query.genres
         val map = if (genres.isEmpty()) emptyMap() else genreMap()
         val slugs = genres.map { map[it]?.second ?: return SearchPage(emptyList(), false, "No such genre") }
         val url = Uri.parse("$ASURA/browse").buildUpon().apply {
             if (text.isNotBlank()) appendQueryParameter("search", text.trim())
             if (slugs.isNotEmpty()) appendQueryParameter("genres", slugs.joinToString(","))
+            if (query.completedOnly) appendQueryParameter("status", "completed")
             if (page > 1) appendQueryParameter("page", page.toString())
         }.build().toString()
         val doc = Jsoup.parse(http.getText(url), ASURA)
@@ -144,7 +160,8 @@ class ArenaSource(private val http: Http) : SearchSource {
 
     override suspend fun genres() = genreMap().values.map { it.first }
 
-    override suspend fun search(text: String, genres: Set<String>, page: Int): SearchPage = coroutineScope {
+    override suspend fun search(query: SearchQuery, page: Int): SearchPage = coroutineScope {
+        val genres = query.genres
         val map = if (genres.isEmpty()) emptyMap() else genreMap()
         val idLists = genres.map { map[it]?.second ?: return@coroutineScope SearchPage(emptyList(), false, "No such genre") }
         // Arena ANDs genre[] params, and some genres exist twice under different ids,
@@ -152,7 +169,7 @@ class ArenaSource(private val http: Http) : SearchSource {
         var combos = listOf(emptyList<String>())
         for (ids in idLists) combos = combos.flatMap { c -> ids.map { c + it } }
         combos = combos.take(4)
-        val pages = combos.map { ids -> async { fetch(text, ids, page) } }.awaitAll()
+        val pages = combos.map { ids -> async { fetch(query.text, ids, query.completedOnly, page) } }.awaitAll()
         SearchPage(pages.flatMap { it.items }.distinctBy { it.url }, pages.any { it.hasMore })
     }
 
@@ -162,10 +179,10 @@ class ArenaSource(private val http: Http) : SearchSource {
         return links.map { genreKey(it.text()) }.filter { it.isNotEmpty() }.toSet()
     }
 
-    private suspend fun fetch(text: String, genreIds: List<String>, page: Int): SearchPage {
+    private suspend fun fetch(text: String, genreIds: List<String>, completedOnly: Boolean, page: Int): SearchPage {
         // Site search (?s=) ranks by relevance but can't filter genres; the /manga/ list
         // can, but its title filter matches any word, so those results are narrowed below.
-        val siteSearch = text.isNotBlank() && genreIds.isEmpty()
+        val siteSearch = text.isNotBlank() && genreIds.isEmpty() && !completedOnly
         val url = if (siteSearch) {
             Uri.parse(if (page > 1) "$ARENA/page/$page/" else "$ARENA/").buildUpon()
                 .appendQueryParameter("s", text.trim()).build().toString()
@@ -173,6 +190,7 @@ class ArenaSource(private val http: Http) : SearchSource {
             Uri.parse("$ARENA/manga/").buildUpon().apply {
                 if (text.isNotBlank()) appendQueryParameter("title", text.trim())
                 genreIds.forEach { appendQueryParameter("genre[]", it) }
+                if (completedOnly) appendQueryParameter("status", "completed")
                 appendQueryParameter("order", "popular")
                 if (page > 1) appendQueryParameter("page", page.toString())
             }.build().toString()
@@ -191,7 +209,8 @@ class ArenaSource(private val http: Http) : SearchSource {
                 coverUrl = img?.absUrl("data-src")?.ifEmpty { null } ?: img?.absUrl("src"),
                 rating = card.selectFirst(".numscore")?.text()?.trim()?.toFloatOrNull(),
                 chapters = card.selectFirst(".epxs")?.text()?.let(::parseCount),
-                status = card.selectFirst(".status")?.text()?.trim()?.ifEmpty { null },
+                // Cards only carry a status badge for completed works.
+                status = card.selectFirst(".status")?.text()?.trim()?.ifEmpty { null } ?: if (completedOnly) "Completed" else null,
             )
         }
         val words = text.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
@@ -263,10 +282,12 @@ class FlameSource(private val http: Http, private val json: Json) : SearchSource
         }
     }
 
-    override suspend fun search(text: String, genres: Set<String>, page: Int): SearchPage = coroutineScope {
-        val q = text.trim().lowercase()
+    override suspend fun search(query: SearchQuery, page: Int): SearchPage = coroutineScope {
+        val q = query.text.trim().lowercase()
+        val genres = query.genres
         val matches = catalog().filter { s ->
             (q.isEmpty() || s.title.lowercase().contains(q)) &&
+                (!query.completedOnly || isCompleted(s.status)) &&
                 genres.all { g -> s.categories.any { genreKey(it) == g } }
         }
         val pageItems = matches.drop((page - 1) * PAGE_SIZE).take(PAGE_SIZE)

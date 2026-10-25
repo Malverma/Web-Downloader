@@ -7,6 +7,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.webdownloader.sites.NativeSites
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -29,6 +30,7 @@ class WebViewExtractor(
     private val context: Context,
     private val rules: SiteRuleRepository,
     private val json: Json,
+    private val natives: NativeSites,
     private val configure: (WebView) -> Unit,
 ) {
     enum class Mode { SERIES, CHAPTER }
@@ -55,6 +57,7 @@ class WebViewExtractor(
 
     /** Analyzes whatever page [webView] currently shows. */
     suspend fun evaluate(webView: WebView, url: String): ExtractResult {
+        if (natives.forUrl(url) != null) return runCatching { natives.extract(url) }.getOrNull() ?: ExtractResult(url = url)
         val raw = eval(webView, scriptFor(url))
         if (raw.isNullOrBlank() || raw == "null") return ExtractResult(url = url)
         return runCatching { json.decodeFromString(ExtractResult.serializer(), raw) }.getOrElse { ExtractResult(url = url) }
@@ -71,7 +74,13 @@ class WebViewExtractor(
     }
 
     /** Loads [url] in a hidden WebView and waits until the series list or chapter images settle. */
-    suspend fun extract(url: String, mode: Mode, timeoutMs: Long = 90_000): ExtractResult = withContext(Dispatchers.Main) {
+    suspend fun extract(url: String, mode: Mode, timeoutMs: Long = 90_000): ExtractResult {
+        // API-driven sites are read directly; no page load needed.
+        natives.extract(url)?.let { return it }
+        return loadAndExtract(url, mode, timeoutMs)
+    }
+
+    private suspend fun loadAndExtract(url: String, mode: Mode, timeoutMs: Long): ExtractResult = withContext(Dispatchers.Main) {
         val host = Uri.parse(url).host.orEmpty()
         val webView = WebView(context)
         configure(webView)

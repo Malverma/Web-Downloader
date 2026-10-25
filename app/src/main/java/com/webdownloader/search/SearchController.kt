@@ -1,6 +1,7 @@
 package com.webdownloader.search
 
 import com.webdownloader.net.Http
+import com.webdownloader.sites.MangaFireBridge
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -17,7 +18,6 @@ import kotlinx.serialization.json.Json
 
 enum class SearchSort(val label: String) {
     RELEVANCE("Relevance"),
-    RATING("Rating"),
     CHAPTERS("Most chapters"),
     TITLE("Title"),
 }
@@ -32,6 +32,8 @@ data class SearchState(
     val excludedGenres: Set<String> = emptySet(),
     /** True while genres of results are being looked up for the exclusion filter. */
     val checkingGenres: Boolean = false,
+    /** Only works their site lists as completed. */
+    val completedOnly: Boolean = false,
     val sites: Set<String> = emptySet(),
     val minRating: Float = 0f,
     val minChapters: Int = 0,
@@ -48,12 +50,12 @@ data class SearchState(
     val visible: List<SearchItem>
         get() = results
             .filter { item -> excludedGenres.isEmpty() || item.genres.orEmpty().none { it in excludedGenres } }
+            .filter { !completedOnly || isCompleted(it.status) }
             .filter { minRating <= 0f || (it.rating ?: -1f) >= minRating }
             .filter { minChapters <= 0 || (it.chapters ?: -1) >= minChapters }
             .let { list ->
                 when (sort) {
                     SearchSort.RELEVANCE -> relevanceOrder(list, text)
-                    SearchSort.RATING -> list.sortedByDescending { it.rating ?: -1f }
                     SearchSort.CHAPTERS -> list.sortedByDescending { it.chapters ?: -1 }
                     SearchSort.TITLE -> list.sortedBy { it.title.lowercase() }
                 }
@@ -77,8 +79,11 @@ private fun relevanceOrder(list: List<SearchItem>, text: String): List<SearchIte
 }
 
 /** Searches Asura, Arena and Flame together; lives in the app container so results survive tab switches. */
-class SearchController(http: Http, json: Json, private val scope: CoroutineScope) {
-    val sources: List<SearchSource> = listOf(AsuraSource(http), ArenaSource(http), FlameSource(http, json))
+class SearchController(http: Http, json: Json, mangaFire: MangaFireBridge, private val scope: CoroutineScope) {
+    val sources: List<SearchSource> = listOf(
+        AsuraSource(http), ArenaSource(http), FlameSource(http, json),
+        MangaFireSource(mangaFire, json), MangaDexSource(http, json),
+    )
 
     private val _state = MutableStateFlow(SearchState(sites = sources.map { it.id }.toSet()))
     val state: StateFlow<SearchState> = _state
@@ -109,6 +114,11 @@ class SearchController(http: Http, json: Json, private val scope: CoroutineScope
     fun setMinChapters(v: Int) = _state.update { it.copy(minChapters = v) }
     fun setSort(v: SearchSort) = _state.update { it.copy(sort = v) }
 
+    fun setCompletedOnly(v: Boolean) {
+        _state.update { it.copy(completedOnly = v) }
+        search()
+    }
+
     /** Cycles a genre: off → included → excluded → off. */
     fun toggleGenre(key: String) {
         val s = _state.value
@@ -118,8 +128,9 @@ class SearchController(http: Http, json: Json, private val scope: CoroutineScope
                 search()
             }
             in s.excludedGenres -> {
-                // Exclusion is applied locally, so no new search is needed.
+                // Some sites drop excluded genres on their side, so search again to get those back.
                 _state.update { it.copy(excludedGenres = it.excludedGenres - key) }
+                search()
             }
             else -> {
                 _state.update { it.copy(genres = it.genres + key) }
@@ -176,22 +187,24 @@ class SearchController(http: Http, json: Json, private val scope: CoroutineScope
         more.clear()
         val active = sources.filter { it.id in s.sites }
         active.forEach { nextPage[it.id] = 1; more[it.id] = true }
-        job = scope.launch { fetch(active, s.text, s.genres) }
+        job = scope.launch { fetch(active, s.query()) }
     }
+
+    private fun SearchState.query() = SearchQuery(text, genres, excludedGenres, completedOnly)
 
     fun loadMore() {
         val s = _state.value
         if (s.loading || s.loadingMore || !s.hasMore) return
         val active = sources.filter { it.id in s.sites && more[it.id] == true }
         _state.update { it.copy(loadingMore = true) }
-        job = scope.launch { fetch(active, s.text, s.genres) }
+        job = scope.launch { fetch(active, s.query()) }
     }
 
-    private suspend fun fetch(active: List<SearchSource>, text: String, genres: Set<String>) {
+    private suspend fun fetch(active: List<SearchSource>, query: SearchQuery) {
         val pages = active.map { src ->
             scope.async {
                 try {
-                    src to Result.success(src.search(text, genres, nextPage[src.id] ?: 1))
+                    src to Result.success(src.search(query, nextPage[src.id] ?: 1))
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {

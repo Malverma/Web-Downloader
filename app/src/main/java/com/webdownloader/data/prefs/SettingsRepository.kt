@@ -17,16 +17,19 @@ import kotlinx.serialization.json.Json
 
 enum class ReaderBackground { BLACK, GRAY, WHITE }
 
-/** App color themes shown as swatches in Settings. */
+/**
+ * App color themes shown as swatches in Settings. Constant names are what's saved,
+ * so they stay fixed even where the theme itself was redesigned.
+ */
 enum class ThemeChoice(val label: String) {
-    CLASSIC("Classic"),
-    PURPLE("Purple"),
-    PINK("Pink"),
     NEBULA("Nebula"),
+    PURPLE("Purple Haze"),
+    PINK("Pink Galaxy"),
     ENCHANTED("Enchanted Forest"),
     MOONLIT("Moonlit Abyss"),
-    OCEAN("Ocean"),
-    DARK("Dark"),
+    OCEAN("Deep Ocean"),
+    CLASSIC("Ember"),
+    DARK("Void"),
 }
 
 @Serializable
@@ -44,7 +47,7 @@ data class AppSettings(
     val keepScreenOn: Boolean = true,
     /** Auto-scroll speed level, 1 (slow) to 10 (fast). */
     val autoScrollSpeed: Int = 3,
-    val theme: ThemeChoice = ThemeChoice.CLASSIC,
+    val theme: ThemeChoice = ThemeChoice.NEBULA,
     val readerBackground: ReaderBackground = ReaderBackground.BLACK,
     val desktopUserAgent: Boolean = false,
     val downloadsPaused: Boolean = false,

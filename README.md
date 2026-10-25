@@ -9,9 +9,9 @@ An Android app for downloading manga chapters, or entire series, from websites a
 - **Quality**: Original / High (1600px) / Medium (1200px) / Low (900px) / Custom. Set it globally, per book, or per download. Existing downloads can be re-compressed later.
 - **Portable files**: each chapter is saved as a `.cbz` (with `ComicInfo.xml`) in `<Library>/<Book Title>/`. Other readers such as Mihon, Perfect Viewer and Kavita can open these files.
 - **Firefox**: in Firefox for Android, use **Share → Web Downloader** on any manga page to open it in the app.
-- **Search**: the **Search** tab searches Asura Scans, Arena Scans and Flame Comics together. Filter by genre (tap once to include, twice to exclude, three times to clear; e.g. Action + Fantasy but not Romance), minimum rating, and minimum chapter count, and sort by relevance, rating, chapters or title. Tap a result to pick chapters to download.
-- **Themes**: Settings → Themes has 8 color themes: Classic, Purple, Pink, Nebula, Enchanted Forest, Moonlit Abyss, Ocean and Dark.
-- **Site rules**: sites work through automatic detection. A small JSON rule (Settings → Sites) can make detection exact. Rules for `asurascans.com`, `arenascan.com` and `flamecomics.xyz` are built in.
+- **Search**: the **Search** tab searches Asura Scans, Arena Scans, Flame Comics, MangaFire and MangaDex together. Filter by genre (tap once to include, twice to exclude, three times to clear; e.g. Action + Fantasy but not Romance), **Completed** works only, minimum rating, and minimum chapter count, and sort by relevance, chapters or title. Tap a result to pick chapters to download.
+- **Themes**: Settings → Themes has 8 dark themes: Nebula (default), Purple Haze, Pink Galaxy, Enchanted Forest, Moonlit Abyss, Deep Ocean, Ember and Void (true black).
+- **Site rules**: sites work through automatic detection. A small JSON rule (Settings → Sites) can make detection exact. Rules for `asurascans.com`, `arenascan.com` and `flamecomics.xyz` are built in. MangaFire and MangaDex are read through their APIs instead.
 
 See [`spec.md`](spec.md) for the full design.
 
@@ -50,11 +50,15 @@ If a site shows a browser check (e.g. Cloudflare), downloads pause and a notific
 
 ## Search sources
 
-| Site | How results are fetched | Rating | Chapters |
-|---|---|---|---|
-| Asura Scans | `/browse?search=&genres=` (server-rendered cards) | ✓ | ✓ |
-| Arena Scans | `/?s=` for text, `/manga/?title=&genre[]=` with genres | ✓ | latest chapter number |
-| Flame Comics | full catalog from `/browse` page data, filtered in the app | — | read from each series page |
+| Site | How results are fetched | Rating | Chapters | Completed filter |
+|---|---|---|---|---|
+| Asura Scans | `/browse?search=&genres=&status=` (server-rendered cards) | ✓ | ✓ | on the site |
+| Arena Scans | `/?s=` for text, `/manga/?title=&genre[]=&status=` otherwise | ✓ | latest chapter number | on the site |
+| Flame Comics | full catalog from `/browse` page data, filtered in the app | — | read from each series page | in the app |
+| MangaFire | `/api/titles`, called from a hidden WebView (the API only accepts requests signed by the site's own script) | read from each title | latest chapter number | on the site |
+| MangaDex | public API (`api.mangadex.org`), English chapters only | ✓ | ✓ | on the site |
+
+Some MangaDex titles only link to official sites for their English chapters; those can't be downloaded, and the chapter picker says so.
 
 Flame Comics doesn't show ratings, so its results are hidden when a minimum rating is set.
 

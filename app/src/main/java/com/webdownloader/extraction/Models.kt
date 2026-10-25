@@ -61,4 +61,4 @@ data class ExtractedImage(
 )
 
 class ChallengeException(host: String) :
-    Exception("$host is showing a browser check. Open it once in the Browse tab, then resume downloads.")
+    Exception("$host is showing a browser check. Open it once in the in-app browser, then resume downloads.")

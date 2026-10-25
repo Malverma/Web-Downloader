@@ -18,6 +18,10 @@ import com.webdownloader.extraction.WebViewExtractor
 import com.webdownloader.net.Http
 import com.webdownloader.reader.ReaderCache
 import com.webdownloader.search.SearchController
+import com.webdownloader.sites.MangaDexSite
+import com.webdownloader.sites.MangaFireBridge
+import com.webdownloader.sites.MangaFireSite
+import com.webdownloader.sites.NativeSites
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +34,7 @@ class WebDownloaderApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         container = AppContainer(this)
         container.appScope.launch { container.downloads.resumeIfPending() }
     }
@@ -64,12 +69,14 @@ class AppContainer(val app: Application) {
     fun userAgent(): String = if (settings.state.value.desktopUserAgent) DESKTOP_UA else defaultUserAgent
 
     val http = Http(::userAgent)
-    val extractor = WebViewExtractor(app, siteRules, json, ::configureWebView)
+    val mangaFire = MangaFireBridge(app, ::configureWebView)
+    val nativeSites = NativeSites(listOf(MangaFireSite(mangaFire, json), MangaDexSite(http, json)))
+    val extractor = WebViewExtractor(app, siteRules, json, nativeSites, ::configureWebView)
     val browser = BrowserHolder(app, extractor, ::configureWebView)
     val downloads = DownloadScheduler(app, settings, chapterDao)
     val library = LibraryRepository(this)
     val chapterDownloader = ChapterDownloader(this)
-    val search = SearchController(http, json, appScope)
+    val search = SearchController(http, json, mangaFire, appScope)
 
     @SuppressLint("SetJavaScriptEnabled")
     fun configureWebView(webView: WebView) {

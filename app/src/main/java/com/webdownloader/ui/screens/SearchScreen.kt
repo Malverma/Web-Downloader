@@ -143,6 +143,12 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
                     label = { Text(if (genreCount == 0) "Genres" else "Genres ($genreCount)") },
                     trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
                 )
+                FilterChip(
+                    selected = s.completedOnly,
+                    onClick = { search.setCompletedOnly(!s.completedOnly) },
+                    label = { Text("Completed") },
+                    leadingIcon = if (s.completedOnly) ({ Icon(Icons.Default.Check, null) }) else null,
+                )
                 ChoiceChip(ratingOptions, s.minRating, search::setMinRating)
                 ChoiceChip(chapterOptions, s.minChapters, search::setMinChapters)
                 ChoiceChip(SearchSort.entries.map { it to "Sort: ${it.label}" }, s.sort, search::setSort)
