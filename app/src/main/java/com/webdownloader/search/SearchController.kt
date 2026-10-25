@@ -1,5 +1,7 @@
 package com.webdownloader.search
 
+import com.webdownloader.data.db.ReadDao
+import com.webdownloader.data.db.ReadSeries
 import com.webdownloader.net.Http
 import com.webdownloader.sites.MangaFireBridge
 import kotlinx.coroutines.CancellationException
@@ -16,11 +18,16 @@ import kotlinx.coroutines.sync.withPermit
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.Json
 
-enum class SearchSort(val label: String) {
-    RELEVANCE("Relevance"),
-    CHAPTERS("Most chapters"),
-    TITLE("Title"),
+enum class SearchSort {
+    /** The order the sites returned, interleaved. */
+    DEFAULT,
+    MOST_CHAPTERS,
+    FEWEST_CHAPTERS,
+    TITLE,
 }
+
+/** Key a manga is marked read under; matches the library's canonical series URL. */
+fun readKey(url: String): String = url.substringBefore('#').trimEnd('/')
 
 data class GenreOption(val key: String, val name: String, val siteIds: Set<String>)
 
@@ -36,8 +43,11 @@ data class SearchState(
     val completedOnly: Boolean = false,
     val sites: Set<String> = emptySet(),
     val minRating: Float = 0f,
-    val minChapters: Int = 0,
-    val sort: SearchSort = SearchSort.RELEVANCE,
+    val sort: SearchSort = SearchSort.DEFAULT,
+    /** Show the manga marked read instead of site results. */
+    val readOnly: Boolean = false,
+    /** Manga marked read, newest first. */
+    val read: List<SearchItem> = emptyList(),
     val results: List<SearchItem> = emptyList(),
     val loading: Boolean = false,
     val loadingMore: Boolean = false,
@@ -46,40 +56,35 @@ data class SearchState(
     val genreOptions: List<GenreOption> = emptyList(),
     val searched: Boolean = false,
 ) {
-    /** Results after the rating/chapter filters and sort, applied locally. */
+    val readUrls: Set<String> get() = read.mapTo(HashSet()) { it.url }
+
+    /** Results after the local filters and sort; the read list when [readOnly]. */
     val visible: List<SearchItem>
-        get() = results
-            .filter { item -> excludedGenres.isEmpty() || item.genres.orEmpty().none { it in excludedGenres } }
-            .filter { !completedOnly || isCompleted(it.status) }
-            .filter { minRating <= 0f || (it.rating ?: -1f) >= minRating }
-            .filter { minChapters <= 0 || (it.chapters ?: -1) >= minChapters }
-            .let { list ->
+        get() = (
+            if (readOnly) read.filter { text.isBlank() || it.title.contains(text.trim(), ignoreCase = true) }
+            else results
+                .filter { item -> excludedGenres.isEmpty() || item.genres.orEmpty().none { it in excludedGenres } }
+                .filter { !completedOnly || isCompleted(it.status) }
+                .filter { minRating <= 0f || (it.rating ?: -1f) >= minRating }
+            ).let { list ->
                 when (sort) {
-                    SearchSort.RELEVANCE -> relevanceOrder(list, text)
-                    SearchSort.CHAPTERS -> list.sortedByDescending { it.chapters ?: -1 }
+                    SearchSort.DEFAULT -> list
+                    SearchSort.MOST_CHAPTERS -> list.sortedByDescending { it.chapters ?: -1 }
+                    // Unknown lengths go last rather than first.
+                    SearchSort.FEWEST_CHAPTERS -> list.sortedBy { it.chapters ?: Int.MAX_VALUE }
                     SearchSort.TITLE -> list.sortedBy { it.title.lowercase() }
                 }
             }
 }
 
-/** Whole-phrase title matches first, then titles containing every word, then the rest (stable). */
-private fun relevanceOrder(list: List<SearchItem>, text: String): List<SearchItem> {
-    val q = text.trim().lowercase()
-    if (q.isEmpty()) return list
-    val words = q.split(Regex("\\s+"))
-    return list.sortedBy { item ->
-        val t = item.title.lowercase()
-        when {
-            t == q -> 0
-            t.contains(q) -> 1
-            words.all { t.contains(it) } -> 2
-            else -> 3
-        }
-    }
-}
-
 /** Searches Asura, Arena and Flame together; lives in the app container so results survive tab switches. */
-class SearchController(http: Http, json: Json, mangaFire: MangaFireBridge, private val scope: CoroutineScope) {
+class SearchController(
+    http: Http,
+    json: Json,
+    mangaFire: MangaFireBridge,
+    private val readDao: ReadDao,
+    private val scope: CoroutineScope,
+) {
     val sources: List<SearchSource> = listOf(
         AsuraSource(http), ArenaSource(http), FlameSource(http, json),
         MangaFireSource(mangaFire, json), MangaDexSource(http, json),
@@ -92,6 +97,28 @@ class SearchController(http: Http, json: Json, mangaFire: MangaFireBridge, priva
     private val more = mutableMapOf<String, Boolean>()
     private var job: Job? = null
     private var genresJob: Job? = null
+
+    init {
+        scope.launch {
+            readDao.observeAll().collect { rows ->
+                val items = rows.map { SearchItem(it.siteId, it.siteName, it.title, it.url, it.coverUrl, it.rating, it.chapters, null) }
+                _state.update { it.copy(read = items) }
+            }
+        }
+    }
+
+    fun setReadOnly(v: Boolean) = _state.update { it.copy(readOnly = v) }
+
+    fun markRead(item: SearchItem) = scope.launch {
+        readDao.mark(
+            ReadSeries(
+                url = readKey(item.url), title = item.title, coverUrl = item.coverUrl, siteId = item.siteId,
+                siteName = item.siteName, chapters = item.chapters, rating = item.rating, markedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    fun unmarkRead(url: String) = scope.launch { readDao.unmark(readKey(url)) }
 
     fun loadGenres() {
         if (_state.value.genreOptions.isNotEmpty() || genresJob?.isActive == true) return
@@ -111,7 +138,6 @@ class SearchController(http: Http, json: Json, mangaFire: MangaFireBridge, priva
 
     fun setText(text: String) = _state.update { it.copy(text = text) }
     fun setMinRating(v: Float) = _state.update { it.copy(minRating = v) }
-    fun setMinChapters(v: Int) = _state.update { it.copy(minChapters = v) }
     fun setSort(v: SearchSort) = _state.update { it.copy(sort = v) }
 
     fun setCompletedOnly(v: Boolean) {
@@ -225,7 +251,7 @@ class SearchController(http: Http, json: Json, mangaFire: MangaFireBridge, priva
                 errors[src.name] = e.message ?: e.javaClass.simpleName
             }
         }
-        // Interleave sites so "Relevance" shows each site's top results first.
+        // Interleave sites so the default order shows each site's top results first.
         val merged = buildList {
             val max = lists.maxOfOrNull { it.size } ?: 0
             for (i in 0 until max) lists.forEach { l -> l.getOrNull(i)?.let(::add) }

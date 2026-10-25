@@ -15,7 +15,8 @@ interface BookDao {
             (SELECT COUNT(*) FROM chapters c WHERE c.bookId = b.id) AS total,
             (SELECT COUNT(*) FROM chapters c WHERE c.bookId = b.id AND c.status = 'DOWNLOADED') AS downloaded,
             (SELECT COUNT(*) FROM chapters c WHERE c.bookId = b.id AND c.status = 'DOWNLOADED' AND c.isRead = 0) AS unread,
-            (SELECT COUNT(*) FROM chapters c WHERE c.bookId = b.id AND c.status IN ('QUEUED', 'DOWNLOADING')) AS active
+            (SELECT COUNT(*) FROM chapters c WHERE c.bookId = b.id AND c.status IN ('QUEUED', 'DOWNLOADING')) AS active,
+            (SELECT COALESCE(SUM(c.sizeBytes), 0) FROM chapters c WHERE c.bookId = b.id AND c.status = 'DOWNLOADED') AS sizeBytes
            FROM books b"""
     )
     fun observeLibrary(): Flow<List<BookWithCounts>>
@@ -145,4 +146,16 @@ interface ChapterDao {
 
     @Query("UPDATE chapters SET isRead = :read WHERE id = :id")
     suspend fun setRead(id: Long, read: Boolean)
+}
+
+@Dao
+interface ReadDao {
+    @Query("SELECT * FROM read_series ORDER BY markedAt DESC")
+    fun observeAll(): Flow<List<ReadSeries>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun mark(series: ReadSeries)
+
+    @Query("DELETE FROM read_series WHERE url = :url")
+    suspend fun unmark(url: String)
 }

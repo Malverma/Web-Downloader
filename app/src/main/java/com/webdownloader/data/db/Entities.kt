@@ -73,6 +73,21 @@ data class BookWithCounts(
     val downloaded: Int,
     val unread: Int,
     val active: Int,
+    /** Total size of the downloaded chapters. */
+    val sizeBytes: Long,
+)
+
+/** A manga the user marked as read, keyed by its canonical URL so search results can be marked too. */
+@Entity(tableName = "read_series")
+data class ReadSeries(
+    @PrimaryKey val url: String,
+    val title: String,
+    val coverUrl: String?,
+    val siteId: String,
+    val siteName: String,
+    val chapters: Int?,
+    val rating: Float?,
+    val markedAt: Long,
 )
 
 data class QueueItem(

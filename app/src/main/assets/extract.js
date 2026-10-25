@@ -91,6 +91,10 @@
   }
   if (!cover) cover = firstCover;
 
+  // ---- description ----
+  var description = (rule.descriptionSelector && textOf(rule.descriptionSelector)) ||
+    textOf('meta[property="og:description"]') || textOf('meta[name="description"]');
+
   // ---- chapter links ----
   if (rule.expandSelector) {
     try {
@@ -204,6 +208,7 @@
     type: type,
     title: title,
     cover: cover,
+    description: description,
     url: here,
     seriesUrl: seriesUrl,
     chapters: chapters,

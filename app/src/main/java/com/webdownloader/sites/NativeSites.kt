@@ -1,6 +1,7 @@
 package com.webdownloader.sites
 
 import android.net.Uri
+import androidx.core.text.HtmlCompat
 import com.webdownloader.extraction.ExtractResult
 import com.webdownloader.extraction.ExtractedChapter
 import com.webdownloader.extraction.ExtractedImage
@@ -54,6 +55,21 @@ internal fun chapterLabel(number: Double?, name: String?): String {
 }
 
 private fun JsonElement?.str(): String? = (this as? JsonPrimitive)?.contentOrNull
+
+/** Turns an HTML or Markdown synopsis into plain text. */
+internal fun plainDescription(raw: String?): String? {
+    if (raw.isNullOrBlank()) return null
+    // MangaDex appends a "---" separated block of links and credits.
+    val main = raw.substringBefore("\n---")
+    val text = HtmlCompat.fromHtml(main.replace("\n", "<br>"), HtmlCompat.FROM_HTML_MODE_COMPACT).toString()
+    return text
+        .replace(Regex("\\[([^\\]]*)]\\([^)]*\\)"), "$1")
+        .replace(Regex("[*_]{2,}"), "")
+        .replace(Regex("\n{3,}"), "\n\n")
+        .trim()
+        .ifEmpty { null }
+}
+
 private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
 private fun JsonObject.arr(key: String): JsonArray = this[key] as? JsonArray ?: JsonArray(emptyList())
 
@@ -100,6 +116,7 @@ class MangaFireSite(private val bridge: MangaFireBridge, private val json: Json)
             type = "series",
             title = title["title"].str(),
             cover = title.obj("poster")?.let { it["large"].str() ?: it["medium"].str() },
+            description = plainDescription(title["description"].str() ?: title["synopsis"].str()),
             url = seriesUrl,
             chapters = chapters,
         )
@@ -163,6 +180,7 @@ class MangaDexSite(private val http: Http, private val json: Json) : NativeSite 
             type = "series",
             title = titleOf(manga),
             cover = coverOf(manga),
+            description = plainDescription(manga.obj("attributes")?.obj("description")?.let { it["en"].str() ?: it.values.firstOrNull().str() }),
             url = "$SITE/title/$id",
             chapters = chapters,
         )

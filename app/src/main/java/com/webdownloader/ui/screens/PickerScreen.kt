@@ -1,5 +1,6 @@
 package com.webdownloader.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -11,12 +12,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -86,6 +92,7 @@ fun PickerScreen(seriesUrl: String, selectUrl: String?, onBack: () -> Unit, onDo
     var quality by remember { mutableStateOf<Quality?>(null) }
     var qualityDialog by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
+    var showDescription by remember { mutableStateOf(false) }
 
     LaunchedEffect(seriesUrl, reload) {
         state = PickerState.Loading
@@ -212,6 +219,33 @@ fun PickerScreen(seriesUrl: String, selectUrl: String?, onBack: () -> Unit, onDo
                             },
                             label = { Text("Not downloaded") },
                         )
+                    }
+                    val description = s.result.description?.trim()?.takeIf { it.isNotEmpty() }
+                    if (description != null) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { showDescription = !showDescription }
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Description", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                            Icon(
+                                if (showDescription) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = if (showDescription) "Hide description" else "Show description",
+                            )
+                        }
+                        AnimatedVisibility(showDescription) {
+                            Text(
+                                description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .heightIn(max = 220.dp)
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                            )
+                        }
                     }
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp),

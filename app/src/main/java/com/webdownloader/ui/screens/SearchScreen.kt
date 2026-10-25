@@ -11,7 +11,8 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -81,12 +83,17 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.webdownloader.search.SearchItem
 import com.webdownloader.search.SearchSort
+import com.webdownloader.search.readKey
 import com.webdownloader.ui.EmptyState
 import com.webdownloader.ui.ScreenScaffold
 import com.webdownloader.ui.rememberContainer
 
 private val ratingOptions = listOf(0f to "Any rating", 7f to "7+", 8f to "8+", 9f to "9+")
-private val chapterOptions = listOf(0 to "Any length", 20 to "20+ ch", 50 to "50+ ch", 100 to "100+ ch")
+private val lengthOptions = listOf(
+    SearchSort.DEFAULT to "Any length",
+    SearchSort.MOST_CHAPTERS to "Most chapters",
+    SearchSort.FEWEST_CHAPTERS to "Fewest chapters",
+)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -110,7 +117,7 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
         }
     }
     LaunchedEffect(nearEnd, s.results.size) {
-        if (nearEnd && s.hasMore) search.loadMore()
+        if (nearEnd && s.hasMore && !s.readOnly) search.loadMore()
     }
 
     // The header (title, search box, site and filter chips) slides away while scrolling down
@@ -178,9 +185,24 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
                             label = { Text("Completed") },
                             leadingIcon = if (s.completedOnly) ({ Icon(Icons.Default.Check, null) }) else null,
                         )
+                        FilterChip(
+                            selected = s.readOnly,
+                            onClick = { search.setReadOnly(!s.readOnly) },
+                            label = { Text(if (s.read.isEmpty()) "Read" else "Read (${s.read.size})") },
+                            leadingIcon = if (s.readOnly) ({ Icon(Icons.Default.Check, null) }) else null,
+                        )
                         ChoiceChip(ratingOptions, s.minRating, search::setMinRating)
-                        ChoiceChip(chapterOptions, s.minChapters, search::setMinChapters)
-                        ChoiceChip(SearchSort.entries.map { it to "Sort: ${it.label}" }, s.sort, search::setSort)
+                        ChoiceChip(
+                            lengthOptions,
+                            s.sort.takeIf { sort -> lengthOptions.any { it.first == sort } } ?: SearchSort.DEFAULT,
+                            search::setSort,
+                        )
+                        FilterChip(
+                            selected = s.sort == SearchSort.TITLE,
+                            onClick = { search.setSort(if (s.sort == SearchSort.TITLE) SearchSort.DEFAULT else SearchSort.TITLE) },
+                            label = { Text("A–Z") },
+                            leadingIcon = if (s.sort == SearchSort.TITLE) ({ Icon(Icons.Default.Check, null) }) else null,
+                        )
                     }
 
                     if (s.genres.isNotEmpty() || s.excludedGenres.isNotEmpty()) {
@@ -206,8 +228,8 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
                 )
             }
 
-            if (s.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
-            if (s.errors.isNotEmpty()) {
+            if (s.loading && !s.readOnly) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+            if (s.errors.isNotEmpty() && !s.readOnly) {
                 Text(
                     s.errors.entries.joinToString("\n") { "${it.key}: ${it.value}" },
                     color = MaterialTheme.colorScheme.error,
@@ -215,7 +237,7 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
-            if (s.minRating > 0f && "flame" in s.sites) {
+            if (s.minRating > 0f && "flame" in s.sites && !s.readOnly) {
                 Text(
                     "Flame Comics doesn't show ratings, so its results are hidden by the rating filter.",
                     style = MaterialTheme.typography.bodySmall,
@@ -224,8 +246,13 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
                 )
             }
 
+            val readUrls = s.readUrls
             when {
-                s.loading && visible.isEmpty() -> Unit
+                s.readOnly && visible.isEmpty() -> EmptyState(
+                    "Nothing marked read",
+                    "Long-press a manga here or in your library to mark it read.",
+                )
+                s.loading && visible.isEmpty() && !s.readOnly -> Unit
                 visible.isEmpty() && !s.hasMore -> EmptyState("No results", "Try a different title, genre or filter.")
                 else -> LazyVerticalGrid(
                     state = grid,
@@ -235,8 +262,15 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(visible, key = { it.url }) { item -> ResultCard(item) { onOpenSeries(item.url) } }
-                    if (s.loadingMore || s.hasMore) {
+                    items(visible, key = { it.url }) { item ->
+                        val isRead = readKey(item.url) in readUrls
+                        ResultCard(
+                            item,
+                            isRead = isRead,
+                            onToggleRead = { if (isRead) search.unmarkRead(item.url) else search.markRead(item) },
+                        ) { onOpenSeries(item.url) }
+                    }
+                    if (!s.readOnly && (s.loadingMore || s.hasMore)) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                                 if (s.loadingMore) CircularProgressIndicator(Modifier.size(28.dp))
@@ -334,9 +368,11 @@ private fun <T> ChoiceChip(options: List<Pair<T, String>>, selected: T, onSelect
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ResultCard(item: SearchItem, onClick: () -> Unit) {
-    Column(Modifier.clickable(onClick = onClick)) {
+private fun ResultCard(item: SearchItem, isRead: Boolean, onToggleRead: () -> Unit, onClick: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    Column(Modifier.combinedClickable(onClick = onClick, onLongClick = { menu = true })) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -362,6 +398,8 @@ private fun ResultCard(item: SearchItem, onClick: () -> Unit) {
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
+            if (isRead) ReadBadge(Modifier.align(Alignment.TopEnd))
+            ReadMenu(menu, isRead, onDismiss = { menu = false }, onToggle = { menu = false; onToggleRead() })
         }
         Text(
             item.title,
@@ -384,5 +422,30 @@ private fun ResultCard(item: SearchItem, onClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+/** Corner marker on covers of manga marked read. */
+@Composable
+fun ReadBadge(modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.primary,
+        shape = RoundedCornerShape(bottomStart = 8.dp),
+        modifier = modifier,
+    ) {
+        Icon(
+            Icons.Default.DoneAll,
+            contentDescription = "Read",
+            tint = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp).size(14.dp),
+        )
+    }
+}
+
+/** Long-press menu on a manga cover for marking it read or unread. */
+@Composable
+fun ReadMenu(expanded: Boolean, isRead: Boolean, onDismiss: () -> Unit, onToggle: () -> Unit) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(text = { Text(if (isRead) "Mark as unread" else "Mark as read") }, onClick = onToggle)
     }
 }

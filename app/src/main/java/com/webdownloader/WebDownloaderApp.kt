@@ -51,10 +51,11 @@ class AppContainer(val app: Application) {
     }
 
     val db: AppDatabase = Room.databaseBuilder(app, AppDatabase::class.java, "webdownloader.db")
-        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
         .build()
     val bookDao get() = db.bookDao()
     val chapterDao get() = db.chapterDao()
+    val readDao get() = db.readDao()
 
     val settings = SettingsRepository(app, json, appScope)
     val siteRules = SiteRuleRepository(app, json)
@@ -76,7 +77,7 @@ class AppContainer(val app: Application) {
     val downloads = DownloadScheduler(app, settings, chapterDao)
     val library = LibraryRepository(this)
     val chapterDownloader = ChapterDownloader(this)
-    val search = SearchController(http, json, mangaFire, appScope)
+    val search = SearchController(http, json, mangaFire, readDao, appScope)
 
     @SuppressLint("SetJavaScriptEnabled")
     fun configureWebView(webView: WebView) {

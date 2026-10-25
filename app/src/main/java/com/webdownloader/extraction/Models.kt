@@ -11,6 +11,8 @@ data class SiteRule(
     val chapterNumberRegex: String? = null,
     val titleSelector: String? = null,
     val coverSelector: String? = null,
+    /** Element holding the series synopsis; falls back to the page's meta description. */
+    val descriptionSelector: String? = null,
     val imageContainerSelector: String? = null,
     val imageFilter: ImageFilter? = null,
     val pageNumberFrom: PageNumberFrom? = null,
@@ -38,6 +40,8 @@ data class ExtractResult(
     val type: String = "none",
     val title: String? = null,
     val cover: String? = null,
+    /** Short synopsis of the series, when the page has one. */
+    val description: String? = null,
     val url: String = "",
     val seriesUrl: String? = null,
     val chapters: List<ExtractedChapter> = emptyList(),

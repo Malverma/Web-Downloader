@@ -6,6 +6,7 @@
   "chapterNumberRegex": "(?:chapter\\s*|-)(\\d+(?:\\.\\d+)?)/?$",
   "titleSelector": "h1.entry-title",
   "coverSelector": ".thumb img",
+  "descriptionSelector": ".entry-content[itemprop='description']",
   "imageContainerSelector": "#readerarea",
   "imageFilter": { "urlContains": "/arena-bucket/", "urlExcludes": "/arena-bucket/images/" },
   "requestDelayMs": 100
