@@ -7,7 +7,8 @@ An Android app for downloading manga chapters, or entire series, from websites a
 - **Quality**: Original / High (1600px) / Medium (1200px) / Low (900px) / Custom. Set it globally, per book, or per download. Existing downloads can be re-compressed later.
 - **Portable files**: each chapter is saved as a `.cbz` (with `ComicInfo.xml`) in `<Library>/<Book Title>/`. Other readers such as Mihon, Perfect Viewer and Kavita can open these files.
 - **Firefox**: in Firefox for Android, use **Share → Web Downloader** on any manga page to open it in the app.
-- **Site rules**: sites work through automatic detection. A small JSON rule (Settings → Sites) can make detection exact. A rule for `asurascans.com` is built in.
+- **Search**: the **Search** tab searches Asura Scans, Arena Scans and Flame Comics together. Filter by genre (pick several, e.g. Action + Fantasy), minimum rating, and minimum chapter count, and sort by relevance, rating, chapters or title. Tap a result to pick chapters to download.
+- **Site rules**: sites work through automatic detection. A small JSON rule (Settings → Sites) can make detection exact. Rules for `asurascans.com`, `arenascan.com` and `flamecomics.xyz` are built in.
 
 See [`spec.md`](spec.md) for the full design.
 
@@ -43,6 +44,16 @@ echo "sdk.dir=$HOME/Android/Sdk" > local.properties   # if ANDROID_HOME isn't se
 | Read | The reader unpacks the CBZ into cache and shows pages in a `LazyColumn`. Next/previous comes from the saved chapter order, so it works offline. |
 
 If a site shows a browser check (e.g. Cloudflare), downloads pause and a notification asks you to open the site once in **Browse**. The cookies are shared, so downloads continue after you **Resume**.
+
+## Search sources
+
+| Site | How results are fetched | Rating | Chapters |
+|---|---|---|---|
+| Asura Scans | `/browse?search=&genres=` (server-rendered cards) | ✓ | ✓ |
+| Arena Scans | `/?s=` for text, `/manga/?title=&genre[]=` with genres | ✓ | latest chapter number |
+| Flame Comics | full catalog from `/browse` page data, filtered in the app | — | read from each series page |
+
+Flame Comics doesn't show ratings, so its results are hidden when a minimum rating is set.
 
 ## Not implemented yet (from the spec)
 

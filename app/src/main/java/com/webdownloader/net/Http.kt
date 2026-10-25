@@ -33,6 +33,18 @@ class Http(private val userAgent: () -> String) {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
+    suspend fun getText(url: String): String = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", userAgent())
+            .header("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+            .build()
+        client.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) throw HttpException(resp.code)
+            resp.body?.string() ?: throw IOException("Empty response")
+        }
+    }
+
     suspend fun get(url: String, referer: String?): ByteArray = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(url)

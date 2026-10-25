@@ -1,0 +1,12 @@
+{
+  "host": "arenascan.com",
+  "seriesUrlPattern": "^https?://(www\\.)?arenascan\\.com/manga/[^/?#]+/?([?#].*)?$",
+  "chapterUrlPattern": "^https?://(www\\.)?arenascan\\.com/[^/?#]+-\\d+(-\\d+)?/?$",
+  "chapterLinkSelector": "#chapterlist li a",
+  "chapterNumberRegex": "(?:chapter\\s*|-)(\\d+(?:\\.\\d+)?)/?$",
+  "titleSelector": "h1.entry-title",
+  "coverSelector": ".thumb img",
+  "imageContainerSelector": "#readerarea",
+  "imageFilter": { "urlContains": "/arena-bucket/" },
+  "requestDelayMs": 300
+}

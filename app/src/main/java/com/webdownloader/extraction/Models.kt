@@ -21,6 +21,8 @@ data class SiteRule(
 @Serializable
 data class ImageFilter(
     val urlContains: String? = null,
+    /** Regex; matching image URLs are skipped (e.g. cover thumbnails). */
+    val urlExcludes: String? = null,
     val altRegex: String? = null,
     val minWidth: Int? = null,
 )

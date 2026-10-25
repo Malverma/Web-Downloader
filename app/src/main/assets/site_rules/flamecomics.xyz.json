@@ -1,0 +1,10 @@
+{
+  "host": "flamecomics.xyz",
+  "seriesUrlPattern": "^https?://(www\\.)?flamecomics\\.xyz/series/\\d+/?([?#].*)?$",
+  "chapterUrlPattern": "^https?://(www\\.)?flamecomics\\.xyz/series/\\d+/[0-9a-f]{8,}/?$",
+  "chapterLinkSelector": "a[href*='/series/']",
+  "titleSelector": "h1",
+  "coverSelector": "img[src*='thumbnail']",
+  "imageFilter": { "urlContains": "cdn.flamecomics.xyz/uploads/images/series/", "urlExcludes": "thumbnail|/_next/" },
+  "requestDelayMs": 300
+}

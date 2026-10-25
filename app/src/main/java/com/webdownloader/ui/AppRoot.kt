@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -34,12 +35,14 @@ import com.webdownloader.ui.screens.DownloadsScreen
 import com.webdownloader.ui.screens.LibraryScreen
 import com.webdownloader.ui.screens.PickerScreen
 import com.webdownloader.ui.screens.ReaderScreen
+import com.webdownloader.ui.screens.SearchScreen
 import com.webdownloader.ui.screens.SettingsScreen
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
 private val tabs = listOf(
     Tab("library", "Library", Icons.AutoMirrored.Filled.LibraryBooks),
+    Tab("search", "Search", Icons.Default.Search),
     Tab("browse", "Browse", Icons.Default.Language),
     Tab("downloads", "Downloads", Icons.Default.Download),
     Tab("settings", "Settings", Icons.Default.Settings),
@@ -99,6 +102,9 @@ fun AppRoot(sharedUrl: String?, onSharedUrlConsumed: () -> Unit) {
                         onOpenBook = { nav.navigate("book/$it") },
                         onBrowse = { nav.openTab("browse") },
                     )
+                }
+                composable("search") {
+                    SearchScreen(onOpenSeries = { url -> nav.navigate("picker?url=${Uri.encode(url)}&select=") })
                 }
                 composable(
                     "browse?url={url}",

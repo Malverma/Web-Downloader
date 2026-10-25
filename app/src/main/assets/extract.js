@@ -104,18 +104,29 @@
   var seen = {}, chapters = [];
   Array.prototype.forEach.call(anchors, function (a) {
     var u = canon(a.getAttribute('href'));
-    if (!u || u === here || seen[u]) return;
+    if (!u || u === here) return;
     if (!/^https?:/i.test(u)) return;
     var p = pathOf(u);
     if (chapterUrlRe) { if (!chapterUrlRe.test(u)) return; }
     else if (num(p) === null) return;
     var raw = (a.innerText || a.textContent || '').trim();
-    var label = raw.split('\n').map(function (s) { return s.trim(); }).filter(Boolean)[0] || '';
+    var lines = raw.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+    var label = lines[0] || '';
+    // "Chapter" and its number are sometimes separate elements.
+    if (!/\d/.test(label) && lines[1] && /^[\d.]+$/.test(lines[1])) label = label + ' ' + lines[1];
     label = label.replace(/\s+/g, ' ').slice(0, 80);
-    var n = num(p);
-    if (n === null) n = num(' ' + label);
-    seen[u] = true;
-    chapters.push({ url: u, label: label, number: n });
+    // Link text ("Chapter 38.1") is more reliable than URLs like "-38-1".
+    var n = num(' ' + label);
+    if (n === null) n = num(p);
+    var prev = seen[u];
+    if (prev) {
+      // Keep the most informative link text ("Chapter 21" over "Latest Chapter").
+      if (prev.number === null && n !== null) { prev.number = n; prev.label = label; }
+      return;
+    }
+    var entry = { url: u, label: label, number: n };
+    seen[u] = entry;
+    chapters.push(entry);
   });
   // Prefer chapters that live under the current page's path (ignores sidebars linking other series).
   var scoped = chapters.filter(function (c) { return c.url.indexOf(here + '/') === 0; });
@@ -129,6 +140,7 @@
   var f = rule.imageFilter || {};
   var minW = f.minWidth || 300;
   var altRe = re(f.altRegex);
+  var excludeRe = re(f.urlExcludes);
   var pageAltRe = rule.pageNumberFrom ? re(rule.pageNumberFrom.alt) : null;
   var pageUrlRe = rule.pageNumberFrom ? re(rule.pageNumberFrom.url) : null;
   var hasRule = !!(f.urlContains || altRe);
@@ -136,6 +148,7 @@
   Array.prototype.forEach.call(root.querySelectorAll('img'), function (img) {
     var src = bestSrc(img);
     if (!src || seenImg[src]) return;
+    if (excludeRe && excludeRe.test(src)) return;
     var alt = img.getAttribute('alt') || '';
     if (hasRule) {
       var ok = (f.urlContains && src.indexOf(f.urlContains) >= 0) || (altRe && altRe.test(alt));
@@ -162,6 +175,7 @@
     while ((mm = urlRe.exec(html)) !== null) {
       var u2 = mm[0];
       if (u2.indexOf(f.urlContains) < 0 || seenImg[u2]) continue;
+      if (excludeRe && excludeRe.test(u2)) continue;
       seenImg[u2] = true;
       images.push({ url: u2, page: null });
     }

@@ -17,6 +17,7 @@ import com.webdownloader.extraction.SiteRuleRepository
 import com.webdownloader.extraction.WebViewExtractor
 import com.webdownloader.net.Http
 import com.webdownloader.reader.ReaderCache
+import com.webdownloader.search.SearchController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -66,6 +67,7 @@ class AppContainer(val app: Application) {
     val downloads = DownloadScheduler(app, settings, chapterDao)
     val library = LibraryRepository(this)
     val chapterDownloader = ChapterDownloader(this)
+    val search = SearchController(http, json, appScope)
 
     @SuppressLint("SetJavaScriptEnabled")
     fun configureWebView(webView: WebView) {
