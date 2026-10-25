@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -43,7 +42,6 @@ private data class Tab(val route: String, val label: String, val icon: ImageVect
 private val tabs = listOf(
     Tab("library", "Library", Icons.AutoMirrored.Filled.LibraryBooks),
     Tab("search", "Search", Icons.Default.Search),
-    Tab("browse", "Browse", Icons.Default.Language),
     Tab("downloads", "Downloads", Icons.Default.Download),
     Tab("settings", "Settings", Icons.Default.Settings),
 )
@@ -100,7 +98,7 @@ fun AppRoot(sharedUrl: String?, onSharedUrlConsumed: () -> Unit) {
                 composable("library") {
                     LibraryScreen(
                         onOpenBook = { nav.navigate("book/$it") },
-                        onBrowse = { nav.openTab("browse") },
+                        onSearch = { nav.openTab("search") },
                     )
                 }
                 composable("search") {
@@ -112,6 +110,7 @@ fun AppRoot(sharedUrl: String?, onSharedUrlConsumed: () -> Unit) {
                 ) { backStack ->
                     BrowserScreen(
                         initialUrl = backStack.arguments?.getString("url"),
+                        onClose = { if (!nav.popBackStack()) nav.openTab("library") },
                         onAddSeries = { series, select ->
                             nav.navigate("picker?url=${Uri.encode(series)}&select=${Uri.encode(select.orEmpty())}")
                         },
@@ -138,6 +137,7 @@ fun AppRoot(sharedUrl: String?, onSharedUrlConsumed: () -> Unit) {
                     BookScreen(
                         bookId = backStack.arguments?.getLong("bookId") ?: 0,
                         onBack = { nav.popBackStack() },
+                        onGetChapters = { url -> nav.navigate("picker?url=${Uri.encode(url)}&select=") },
                         onRead = { nav.navigate("reader/$it") },
                         onOpenUrl = { nav.openBrowser(it) },
                     )

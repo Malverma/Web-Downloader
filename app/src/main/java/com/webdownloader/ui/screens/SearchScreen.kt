@@ -28,6 +28,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Search
@@ -38,9 +40,9 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -63,6 +65,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -133,10 +136,11 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
                 Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val genreCount = s.genres.size + s.excludedGenres.size
                 FilterChip(
-                    selected = s.genres.isNotEmpty(),
+                    selected = genreCount > 0,
                     onClick = { genreDialog = true },
-                    label = { Text(if (s.genres.isEmpty()) "Genres" else "Genres (${s.genres.size})") },
+                    label = { Text(if (genreCount == 0) "Genres" else "Genres ($genreCount)") },
                     trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
                 )
                 ChoiceChip(ratingOptions, s.minRating, search::setMinRating)
@@ -144,21 +148,25 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
                 ChoiceChip(SearchSort.entries.map { it to "Sort: ${it.label}" }, s.sort, search::setSort)
             }
 
-            if (s.genres.isNotEmpty()) {
+            if (s.genres.isNotEmpty() || s.excludedGenres.isNotEmpty()) {
                 FlowRow(
                     Modifier.padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    s.genres.sorted().forEach { key ->
+                    (s.genres.sorted() + s.excludedGenres.sorted()).forEach { key ->
                         val name = s.genreOptions.firstOrNull { it.key == key }?.name ?: key
-                        InputChip(
-                            selected = true,
-                            onClick = { search.toggleGenre(key) },
-                            label = { Text(name) },
-                            trailingIcon = { Icon(Icons.Default.Close, "Remove", Modifier.size(16.dp)) },
-                        )
+                        // Tapping cycles the genre on (included → excluded → off), same as in the dialog.
+                        GenreChip(name, genreState(key, s.genres, s.excludedGenres)) { search.toggleGenre(key) }
                     }
                 }
+            }
+            if (s.checkingGenres) {
+                Text(
+                    "Checking genres to hide excluded ones…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
             }
 
             if (s.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
@@ -214,18 +222,15 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
                 } else {
                     Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
                         Text(
-                            "Pick several to narrow results. Sites without a selected genre are skipped.",
+                            "Tap once to include a genre, twice to exclude it, and a third time to clear it. " +
+                                "Sites without an included genre are skipped.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(bottom = 8.dp),
                         )
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             s.genreOptions.forEach { g ->
-                                FilterChip(
-                                    selected = g.key in s.genres,
-                                    onClick = { search.toggleGenre(g.key) },
-                                    label = { Text(g.name) },
-                                )
+                                GenreChip(g.name, genreState(g.key, s.genres, s.excludedGenres)) { search.toggleGenre(g.key) }
                             }
                         }
                     }
@@ -233,10 +238,45 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
             },
             confirmButton = { TextButton(onClick = { genreDialog = false }) { Text("Done") } },
             dismissButton = {
-                if (s.genres.isNotEmpty()) TextButton(onClick = { search.clearGenres() }) { Text("Clear") }
+                if (s.genres.isNotEmpty() || s.excludedGenres.isNotEmpty()) TextButton(onClick = { search.clearGenres() }) { Text("Clear") }
             },
         )
     }
+}
+
+private enum class GenreState { OFF, INCLUDED, EXCLUDED }
+
+private fun genreState(key: String, included: Set<String>, excluded: Set<String>) = when (key) {
+    in included -> GenreState.INCLUDED
+    in excluded -> GenreState.EXCLUDED
+    else -> GenreState.OFF
+}
+
+@Composable
+private fun GenreChip(name: String, state: GenreState, onClick: () -> Unit) {
+    val error = MaterialTheme.colorScheme.error
+    FilterChip(
+        selected = state != GenreState.OFF,
+        onClick = onClick,
+        label = {
+            Text(
+                name,
+                textDecoration = if (state == GenreState.EXCLUDED) TextDecoration.LineThrough else null,
+            )
+        },
+        leadingIcon = when (state) {
+            GenreState.INCLUDED -> { { Icon(Icons.Default.Check, "Included", Modifier.size(16.dp)) } }
+            GenreState.EXCLUDED -> { { Icon(Icons.Default.Block, "Excluded", Modifier.size(16.dp)) } }
+            GenreState.OFF -> null
+        },
+        colors = if (state == GenreState.EXCLUDED) {
+            FilterChipDefaults.filterChipColors(
+                selectedContainerColor = MaterialTheme.colorScheme.errorContainer,
+                selectedLabelColor = MaterialTheme.colorScheme.onErrorContainer,
+                selectedLeadingIconColor = error,
+            )
+        } else FilterChipDefaults.filterChipColors(),
+    )
 }
 
 @Composable

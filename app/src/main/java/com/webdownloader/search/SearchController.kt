@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.Json
 
 enum class SearchSort(val label: String) {
@@ -23,7 +26,12 @@ data class GenreOption(val key: String, val name: String, val siteIds: Set<Strin
 
 data class SearchState(
     val text: String = "",
+    /** Genres results must have (sent to the sites). */
     val genres: Set<String> = emptySet(),
+    /** Genres results must not have (filtered in the app, since no site supports it). */
+    val excludedGenres: Set<String> = emptySet(),
+    /** True while genres of results are being looked up for the exclusion filter. */
+    val checkingGenres: Boolean = false,
     val sites: Set<String> = emptySet(),
     val minRating: Float = 0f,
     val minChapters: Int = 0,
@@ -39,6 +47,7 @@ data class SearchState(
     /** Results after the rating/chapter filters and sort, applied locally. */
     val visible: List<SearchItem>
         get() = results
+            .filter { item -> excludedGenres.isEmpty() || item.genres.orEmpty().none { it in excludedGenres } }
             .filter { minRating <= 0f || (it.rating ?: -1f) >= minRating }
             .filter { minChapters <= 0 || (it.chapters ?: -1) >= minChapters }
             .let { list ->
@@ -100,14 +109,55 @@ class SearchController(http: Http, json: Json, private val scope: CoroutineScope
     fun setMinChapters(v: Int) = _state.update { it.copy(minChapters = v) }
     fun setSort(v: SearchSort) = _state.update { it.copy(sort = v) }
 
+    /** Cycles a genre: off → included → excluded → off. */
     fun toggleGenre(key: String) {
-        _state.update { it.copy(genres = if (key in it.genres) it.genres - key else it.genres + key) }
-        search()
+        val s = _state.value
+        when (key) {
+            in s.genres -> {
+                _state.update { it.copy(genres = it.genres - key, excludedGenres = it.excludedGenres + key) }
+                search()
+            }
+            in s.excludedGenres -> {
+                // Exclusion is applied locally, so no new search is needed.
+                _state.update { it.copy(excludedGenres = it.excludedGenres - key) }
+            }
+            else -> {
+                _state.update { it.copy(genres = it.genres + key) }
+                search()
+            }
+        }
     }
 
     fun clearGenres() {
-        _state.update { it.copy(genres = emptySet()) }
+        _state.update { it.copy(genres = emptySet(), excludedGenres = emptySet()) }
         search()
+    }
+
+    private val genreCache = ConcurrentHashMap<String, Set<String>>()
+    private val genreLimit = Semaphore(6)
+    private var enrichJob: Job? = null
+
+    /** Looks up genres for results that lack them, so excluded genres can be filtered out. */
+    private fun enrichGenres() {
+        if (_state.value.excludedGenres.isEmpty() || enrichJob?.isActive == true) return
+        enrichJob = scope.launch {
+            while (true) {
+                val missing = _state.value.results.filter { it.genres == null }
+                if (missing.isEmpty() || _state.value.excludedGenres.isEmpty()) break
+                _state.update { it.copy(checkingGenres = true) }
+                val found = missing.map { item ->
+                    async {
+                        genreLimit.withPermit {
+                            val src = sources.firstOrNull { it.id == item.siteId }
+                            item.url to (genreCache[item.url] ?: runCatching { src?.genresOf(item.url) }.getOrNull() ?: emptySet())
+                                .also { genreCache[item.url] = it }
+                        }
+                    }
+                }.awaitAll().toMap()
+                _state.update { st -> st.copy(results = st.results.map { r -> found[r.url]?.let { r.copy(genres = it) } ?: r }) }
+            }
+            _state.update { it.copy(checkingGenres = false) }
+        }
     }
 
     fun toggleSite(id: String) {
@@ -169,12 +219,14 @@ class SearchController(http: Http, json: Json, private val scope: CoroutineScope
         }
         _state.update { st ->
             st.copy(
-                results = (st.results + merged).distinctBy { it.url },
+                results = (st.results + merged.map { m -> genreCache[m.url]?.let { g -> m.copy(genres = m.genres ?: g) } ?: m })
+                    .distinctBy { it.url },
                 loading = false,
                 loadingMore = false,
                 hasMore = more.values.any { it },
                 errors = st.errors + errors,
             )
         }
+        enrichGenres()
     }
 }

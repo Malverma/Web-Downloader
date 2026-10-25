@@ -45,7 +45,9 @@ class AppContainer(val app: Application) {
         isLenient = true
     }
 
-    val db: AppDatabase = Room.databaseBuilder(app, AppDatabase::class.java, "webdownloader.db").build()
+    val db: AppDatabase = Room.databaseBuilder(app, AppDatabase::class.java, "webdownloader.db")
+        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .build()
     val bookDao get() = db.bookDao()
     val chapterDao get() = db.chapterDao()
 

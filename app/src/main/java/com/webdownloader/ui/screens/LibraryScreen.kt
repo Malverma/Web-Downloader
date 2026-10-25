@@ -61,8 +61,9 @@ private enum class LibrarySort(val label: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(onOpenBook: (Long) -> Unit, onBrowse: () -> Unit) {
+fun LibraryScreen(onOpenBook: (Long) -> Unit, onSearch: () -> Unit) {
     val c = rememberContainer()
+    // The library lists manga you've downloaded (or are downloading); finding new ones is Search's job.
     val books by remember { c.bookDao.observeLibrary() }.collectAsState(initial = null)
     var query by rememberSaveable { mutableStateOf("") }
     var searching by rememberSaveable { mutableStateOf(false) }
@@ -105,12 +106,13 @@ fun LibraryScreen(onOpenBook: (Long) -> Unit, onBrowse: () -> Unit) {
             val list = books
             when {
                 list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                list.isEmpty() -> EmptyState(
-                    title = "No books yet",
-                    message = "Open a manga's page in Browse, then tap “Add as Book”.",
-                ) { Button(onClick = onBrowse) { Text("Browse") } }
+                list.none { it.downloaded > 0 || it.active > 0 } -> EmptyState(
+                    title = "No downloads yet",
+                    message = "Find a manga in Search, pick chapters, and they'll show up here once downloaded.",
+                ) { Button(onClick = onSearch) { Text("Search") } }
                 else -> {
                     val shown = list
+                        .filter { it.downloaded > 0 || it.active > 0 }
                         .filter { query.isBlank() || it.book.title.contains(query, ignoreCase = true) }
                         .let { l ->
                             when (sort) {
@@ -168,7 +170,10 @@ private fun BookCard(item: BookWithCounts, onClick: () -> Unit) {
             modifier = Modifier.padding(top = 6.dp),
         )
         Text(
-            "${item.downloaded} / ${item.total} downloaded",
+            buildString {
+                append(if (item.downloaded == 1) "1 chapter" else "${item.downloaded} chapters")
+                if (item.active > 0) append(" · ${item.active} downloading")
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

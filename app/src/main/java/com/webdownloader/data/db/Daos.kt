@@ -14,7 +14,8 @@ interface BookDao {
         """SELECT b.*,
             (SELECT COUNT(*) FROM chapters c WHERE c.bookId = b.id) AS total,
             (SELECT COUNT(*) FROM chapters c WHERE c.bookId = b.id AND c.status = 'DOWNLOADED') AS downloaded,
-            (SELECT COUNT(*) FROM chapters c WHERE c.bookId = b.id AND c.status = 'DOWNLOADED' AND c.isRead = 0) AS unread
+            (SELECT COUNT(*) FROM chapters c WHERE c.bookId = b.id AND c.status = 'DOWNLOADED' AND c.isRead = 0) AS unread,
+            (SELECT COUNT(*) FROM chapters c WHERE c.bookId = b.id AND c.status IN ('QUEUED', 'DOWNLOADING')) AS active
            FROM books b"""
     )
     fun observeLibrary(): Flow<List<BookWithCounts>>
@@ -63,6 +64,15 @@ interface ChapterDao {
 
     @Query("SELECT * FROM chapters WHERE bookId = :bookId AND sortIndex < :sortIndex ORDER BY sortIndex DESC LIMIT 1")
     suspend fun previous(bookId: Long, sortIndex: Int): Chapter?
+
+    @Query("SELECT * FROM chapters WHERE bookId = :bookId AND sortIndex > :sortIndex AND status = 'DOWNLOADED' ORDER BY sortIndex LIMIT 1")
+    suspend fun nextDownloaded(bookId: Long, sortIndex: Int): Chapter?
+
+    @Query("SELECT * FROM chapters WHERE bookId = :bookId AND sortIndex < :sortIndex AND status = 'DOWNLOADED' ORDER BY sortIndex DESC LIMIT 1")
+    suspend fun previousDownloaded(bookId: Long, sortIndex: Int): Chapter?
+
+    @Query("UPDATE chapters SET openedAt = :time WHERE id = :id")
+    suspend fun markOpened(id: Long, time: Long)
 
     @Query("SELECT * FROM chapters WHERE status = 'QUEUED' ORDER BY queuedAt, sortIndex LIMIT 1")
     suspend fun nextQueued(): Chapter?

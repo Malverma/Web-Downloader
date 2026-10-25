@@ -63,6 +63,8 @@ data class Chapter(
     val progressDone: Int = 0,
     val progressTotal: Int = 0,
     val removedFromSource: Boolean = false,
+    /** When the chapter was last opened in the reader; opened chapters are shown darker. */
+    val openedAt: Long? = null,
 )
 
 data class BookWithCounts(
@@ -70,6 +72,7 @@ data class BookWithCounts(
     val total: Int,
     val downloaded: Int,
     val unread: Int,
+    val active: Int,
 )
 
 data class QueueItem(

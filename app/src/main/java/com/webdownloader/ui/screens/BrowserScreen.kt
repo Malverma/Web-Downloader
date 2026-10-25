@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.MoreVert
@@ -50,7 +51,7 @@ import com.webdownloader.ui.rememberContainer
 import kotlinx.coroutines.launch
 
 @Composable
-fun BrowserScreen(initialUrl: String?, onAddSeries: (seriesUrl: String, selectUrl: String?) -> Unit) {
+fun BrowserScreen(initialUrl: String?, onClose: () -> Unit, onAddSeries: (seriesUrl: String, selectUrl: String?) -> Unit) {
     val c = rememberContainer()
     val holder = c.browser
     val context = LocalContext.current
@@ -71,7 +72,8 @@ fun BrowserScreen(initialUrl: String?, onAddSeries: (seriesUrl: String, selectUr
     BackHandler(enabled = canGoBack) { holder.goBack() }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onClose) { Icon(Icons.Default.Close, contentDescription = "Close browser") }
             OutlinedTextField(
                 value = address,
                 onValueChange = { address = it },

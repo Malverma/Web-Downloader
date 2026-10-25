@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -53,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -73,7 +73,13 @@ private enum class BookDialog { QUALITY, RECOMPRESS, RENAME, DELETE_BOOK, DELETE
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun BookScreen(bookId: Long, onBack: () -> Unit, onRead: (Long) -> Unit, onOpenUrl: (String) -> Unit) {
+fun BookScreen(
+    bookId: Long,
+    onBack: () -> Unit,
+    onGetChapters: (String) -> Unit,
+    onRead: (Long) -> Unit,
+    onOpenUrl: (String) -> Unit,
+) {
     val c = rememberContainer()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -93,6 +99,7 @@ fun BookScreen(bookId: Long, onBack: () -> Unit, onRead: (Long) -> Unit, onOpenU
     }
 
     val downloaded = chapters.filter { it.status == ChapterStatus.DOWNLOADED }
+    val active = chapters.count { it.status == ChapterStatus.QUEUED || it.status == ChapterStatus.DOWNLOADING }
     val resumeTarget = run {
         chapters.lastOrNull { it.status == ChapterStatus.DOWNLOADED && !it.isRead && it.lastPageRead > 0 }
             ?: chapters.drop(chapters.indexOfLast { it.isRead } + 1).firstOrNull { it.status == ChapterStatus.DOWNLOADED }
@@ -130,12 +137,10 @@ fun BookScreen(bookId: Long, onBack: () -> Unit, onRead: (Long) -> Unit, onOpenU
                 title = { Text(b.title, maxLines = 1) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
-                    IconButton(onClick = ::checkForUpdates, enabled = !checking) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Check for new chapters")
-                    }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(text = { Text("Check for new chapters") }, onClick = { menu = false; checkForUpdates() })
                             DropdownMenuItem(text = { Text("Quality for this book") }, onClick = { menu = false; dialog = BookDialog.QUALITY })
                             DropdownMenuItem(text = { Text("Re-compress downloads") }, onClick = { menu = false; dialog = BookDialog.RECOMPRESS })
                             DropdownMenuItem(text = { Text("Open source page") }, onClick = { menu = false; onOpenUrl(b.sourceUrl) })
@@ -166,7 +171,10 @@ fun BookScreen(bookId: Long, onBack: () -> Unit, onRead: (Long) -> Unit, onOpenU
                         Column(Modifier.padding(start = 16.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(b.title, style = MaterialTheme.typography.titleLarge)
                             Text(b.sourceHost, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${downloaded.size} of ${chapters.size} chapters downloaded", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                "${downloaded.size} downloaded" + if (active > 0) " · $active downloading" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                             Text(
                                 "Storage: ${formatBytes(downloaded.sumOf { it.sizeBytes ?: 0 })} · Quality: ${(b.qualityOverride ?: settings.defaultQuality).label}",
                                 style = MaterialTheme.typography.bodySmall,
@@ -178,18 +186,12 @@ fun BookScreen(bookId: Long, onBack: () -> Unit, onRead: (Long) -> Unit, onOpenU
                         Button(onClick = { resumeTarget?.let { onRead(it.id) } }, enabled = resumeTarget != null, modifier = Modifier.weight(1f)) {
                             Text(if (chapters.any { it.isRead || it.lastPageRead > 0 }) "Resume" else "Start reading")
                         }
-                        OutlinedButton(
-                            onClick = {
-                                scope.launch {
-                                    c.library.queue(chapters.filter { it.status == ChapterStatus.NOT_DOWNLOADED || it.status == ChapterStatus.FAILED }.map { it.id })
-                                }
-                            },
-                            enabled = chapters.any { it.status == ChapterStatus.NOT_DOWNLOADED || it.status == ChapterStatus.FAILED },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("Download all") }
+                        OutlinedButton(onClick = { onGetChapters(b.sourceUrl) }, modifier = Modifier.weight(1f)) {
+                            Text("Get more chapters")
+                        }
                     }
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Chapters", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        Text("Downloaded chapters", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                         TextButton(onClick = { newestFirst = !newestFirst }) {
                             Icon(Icons.Default.SwapVert, null)
                             Text(if (newestFirst) "Newest first" else "Oldest first")
@@ -198,7 +200,17 @@ fun BookScreen(bookId: Long, onBack: () -> Unit, onRead: (Long) -> Unit, onOpenU
                 }
                 HorizontalDivider()
             }
-            items(if (newestFirst) chapters.reversed() else chapters, key = { it.id }) { ch ->
+            if (downloaded.isEmpty()) {
+                item(key = "empty") {
+                    Text(
+                        if (active > 0) "Downloading… chapters appear here when they finish." else "No downloaded chapters. Tap “Get more chapters”.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            }
+            items(if (newestFirst) downloaded.reversed() else downloaded, key = { it.id }) { ch ->
                 ChapterRow(
                     chapter = ch,
                     onClick = {
@@ -309,10 +321,13 @@ fun BookScreen(bookId: Long, onBack: () -> Unit, onRead: (Long) -> Unit, onOpenU
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChapterRow(chapter: Chapter, onClick: () -> Unit, onLongClick: () -> Unit, onAction: () -> Unit) {
-    val dim = chapter.isRead
+    // Chapters you've opened get a darker row so new ones stand out.
+    val opened = chapter.openedAt != null || chapter.isRead || chapter.lastPageRead > 0
+    val dim = opened
     Row(
         Modifier
             .fillMaxWidth()
+            .background(if (opened) Color.Black.copy(alpha = 0.22f) else Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

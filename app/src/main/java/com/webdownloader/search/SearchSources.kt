@@ -32,6 +32,8 @@ data class SearchItem(
     val rating: Float?,
     val chapters: Int?,
     val status: String?,
+    /** Genre keys, when known; needed to apply excluded genres. */
+    val genres: Set<String>? = null,
 )
 
 data class SearchPage(val items: List<SearchItem>, val hasMore: Boolean, val note: String? = null)
@@ -47,6 +49,9 @@ interface SearchSource {
     suspend fun genres(): List<String>
 
     suspend fun search(text: String, genres: Set<String>, page: Int): SearchPage
+
+    /** Genre keys for one series (read from its page), or null if unavailable. */
+    suspend fun genresOf(url: String): Set<String>? = null
 }
 
 private const val ASURA = "https://asurascans.com"
@@ -103,6 +108,14 @@ class AsuraSource(private val http: Http) : SearchSource {
         return SearchPage(items, hasMore = items.size >= 20)
     }
 
+    override suspend fun genresOf(url: String): Set<String>? {
+        val bySlug = genreMap().values.associate { (n, slug) -> slug to genreKey(n) }
+        val html = http.getText(url)
+        return Regex("href=\"/browse\\?genres=([a-z0-9-]+)\"").findAll(html)
+            .map { bySlug[it.groupValues[1]] ?: it.groupValues[1].replace('-', ' ') }
+            .toSet()
+    }
+
     companion object {
         private val STATUSES = setOf("ongoing", "completed", "hiatus", "dropped", "season end", "coming soon")
     }
@@ -141,6 +154,12 @@ class ArenaSource(private val http: Http) : SearchSource {
         combos = combos.take(4)
         val pages = combos.map { ids -> async { fetch(text, ids, page) } }.awaitAll()
         SearchPage(pages.flatMap { it.items }.distinctBy { it.url }, pages.any { it.hasMore })
+    }
+
+    override suspend fun genresOf(url: String): Set<String>? {
+        val doc = Jsoup.parse(http.getText(url), ARENA)
+        val links = doc.select(".mgen a, .seriestugenre a").ifEmpty { doc.select("a[href*=/genres/]") }
+        return links.map { genreKey(it.text()) }.filter { it.isNotEmpty() }.toSet()
     }
 
     private suspend fun fetch(text: String, genreIds: List<String>, page: Int): SearchPage {
@@ -254,7 +273,10 @@ class FlameSource(private val http: Http, private val json: Json) : SearchSource
         // The catalog has no chapter counts, so read them from each series page.
         val counts = pageItems.map { s -> async { chapterCount(s.id) } }.awaitAll()
         val items = pageItems.mapIndexed { i, s ->
-            SearchItem(id, name, s.title, "$FLAME/series/${s.id}", s.cover, rating = null, chapters = counts[i], status = s.status)
+            SearchItem(
+                id, name, s.title, "$FLAME/series/${s.id}", s.cover, rating = null, chapters = counts[i], status = s.status,
+                genres = s.categories.map(::genreKey).toSet(),
+            )
         }
         SearchPage(items, hasMore = matches.size > page * PAGE_SIZE)
     }

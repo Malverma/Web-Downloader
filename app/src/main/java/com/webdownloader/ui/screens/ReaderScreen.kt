@@ -20,15 +20,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -52,6 +57,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -85,6 +91,9 @@ private sealed interface ReaderState {
         val pages: List<ReaderCache.Page>,
         val previous: Chapter?,
         val next: Chapter?,
+        /** Nearest downloaded chapters, for the arrow buttons. */
+        val previousDownloaded: Chapter?,
+        val nextDownloaded: Chapter?,
     ) : ReaderState
 }
 
@@ -114,11 +123,15 @@ fun ReaderScreen(
             }
             val pages = c.readerCache.open(chapter)
             if (pages.isEmpty()) throw IllegalStateException("The chapter file has no pages.")
-            c.bookDao.touchRead(book.id, System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            c.bookDao.touchRead(book.id, now)
+            c.chapterDao.markOpened(chapter.id, now)
             ReaderState.Ready(
                 chapter, book, pages,
                 c.chapterDao.previous(book.id, chapter.sortIndex),
                 c.chapterDao.next(book.id, chapter.sortIndex),
+                c.chapterDao.previousDownloaded(book.id, chapter.sortIndex),
+                c.chapterDao.nextDownloaded(book.id, chapter.sortIndex),
             )
         } catch (e: CancellationException) {
             throw e
@@ -250,6 +263,20 @@ private fun ReaderContent(
             }
         }
 
+        // Always-available chapter arrows (bottom right); they sit above the toolbar when it's shown.
+        if (s.previousDownloaded != null || s.nextDownloaded != null) {
+            Row(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(end = 16.dp, bottom = if (showUi) 80.dp else 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ChapterArrow(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous chapter", s.previousDownloaded) { onOpenChapter(it.id) }
+                ChapterArrow(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next chapter", s.nextDownloaded) { onOpenChapter(it.id) }
+            }
+        }
+
         AnimatedVisibility(visible = showUi, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
             Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -267,7 +294,7 @@ private fun ReaderContent(
                     Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = { s.previous?.let { if (it.status == ChapterStatus.DOWNLOADED) onOpenChapter(it.id) } }, enabled = s.previous?.status == ChapterStatus.DOWNLOADED) {
+                    IconButton(onClick = { s.previousDownloaded?.let { onOpenChapter(it.id) } }, enabled = s.previousDownloaded != null) {
                         Icon(Icons.Default.SkipPrevious, "Previous chapter")
                     }
                     Text("${currentPage + 1} / $pageCount", style = MaterialTheme.typography.labelMedium)
@@ -277,12 +304,30 @@ private fun ReaderContent(
                         valueRange = 0f..(pageCount - 1).coerceAtLeast(1).toFloat(),
                         modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                     )
-                    IconButton(onClick = { next?.let { if (it.status == ChapterStatus.DOWNLOADED) onOpenChapter(it.id) } }, enabled = next?.status == ChapterStatus.DOWNLOADED) {
+                    IconButton(onClick = { s.nextDownloaded?.let { onOpenChapter(it.id) } }, enabled = s.nextDownloaded != null) {
                         Icon(Icons.Default.SkipNext, "Next chapter")
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ChapterArrow(icon: ImageVector, description: String, target: Chapter?, onOpen: (Chapter) -> Unit) {
+    if (target == null) {
+        Spacer(Modifier.size(48.dp))
+        return
+    }
+    FilledTonalIconButton(
+        onClick = { onOpen(target) },
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = Color.Black.copy(alpha = 0.55f),
+            contentColor = Color.White,
+        ),
+        modifier = Modifier.size(48.dp),
+    ) {
+        Icon(icon, contentDescription = "$description: ${target.label}")
     }
 }
 
