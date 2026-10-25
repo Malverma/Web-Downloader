@@ -11,13 +11,17 @@ An Android app for downloading manga chapters, or entire series, from websites a
 
 See [`spec.md`](spec.md) for the full design.
 
-## Install for testing
+## Install
 
-1. Open the repo's **Actions** tab and select the latest **Build APK** run.
-2. Download the `web-downloader-debug-apk` artifact and unzip it.
-3. Copy `app-debug.apk` to your phone and open it. Android will ask you to allow installing from that source.
+Download **[WebDownloader.apk](https://github.com/Malverma/Web-Downloader/releases/latest/download/WebDownloader.apk)** from the latest release and open it on your phone. Android will ask you to allow installs from your browser or file manager. Requires Android 8.0+.
 
-Or build it locally (see below) and run `adb install app/build/outputs/apk/debug/app-debug.apk`.
+To publish a new release, bump `versionCode`/`versionName` in `app/build.gradle.kts` and push a tag:
+
+```sh
+git tag v0.1.1 && git push origin v0.1.1
+```
+
+The **Release APK** workflow builds a signed APK and attaches it to a GitHub Release. Every build uses the same key (`app/release.keystore`), so new versions install as updates.
 
 ## Build
 

@@ -18,11 +18,21 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        create("release") {
+            // Personal sideload key, committed so every build (local or CI) has the
+            // same signature and installs as an update over the previous version.
+            storeFile = file("release.keystore")
+            storePassword = "webdownloader"
+            keyAlias = "webdownloader"
+            keyPassword = "webdownloader"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so the release APK is installable for testing.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
