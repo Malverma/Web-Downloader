@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -53,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -89,7 +89,6 @@ fun BookScreen(
     var menu by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<BookDialog?>(null) }
     var checking by remember { mutableStateOf(false) }
-    var newestFirst by remember { mutableStateOf(false) }
 
     val b = book ?: run {
         ScreenScaffold(topBar = {
@@ -182,19 +181,12 @@ fun BookScreen(
                             if (checking) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
                         }
                     }
-                    Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(Modifier.padding(top = 16.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Button(onClick = { resumeTarget?.let { onRead(it.id) } }, enabled = resumeTarget != null, modifier = Modifier.weight(1f)) {
-                            Text(if (chapters.any { it.isRead || it.lastPageRead > 0 }) "Resume" else "Start reading")
+                            Text(if (chapters.any { it.isRead || it.lastPageRead > 0 || it.openedAt != null }) "Resume" else "Start reading")
                         }
                         OutlinedButton(onClick = { onGetChapters(b.sourceUrl) }, modifier = Modifier.weight(1f)) {
-                            Text("Get more chapters")
-                        }
-                    }
-                    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Downloaded chapters", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { newestFirst = !newestFirst }) {
-                            Icon(Icons.Default.SwapVert, null)
-                            Text(if (newestFirst) "Newest first" else "Oldest first")
+                            Text("Download")
                         }
                     }
                 }
@@ -203,14 +195,14 @@ fun BookScreen(
             if (downloaded.isEmpty()) {
                 item(key = "empty") {
                     Text(
-                        if (active > 0) "Downloading… chapters appear here when they finish." else "No downloaded chapters. Tap “Get more chapters”.",
+                        if (active > 0) "Downloading… chapters appear here when they finish." else "No downloaded chapters. Tap “Download”.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(16.dp),
                     )
                 }
             }
-            items(if (newestFirst) downloaded.reversed() else downloaded, key = { it.id }) { ch ->
+            items(downloaded, key = { it.id }) { ch ->
                 ChapterRow(
                     chapter = ch,
                     onClick = {
@@ -327,7 +319,8 @@ private fun ChapterRow(chapter: Chapter, onClick: () -> Unit, onLongClick: () ->
     Row(
         Modifier
             .fillMaxWidth()
-            .background(if (opened) Color.Black.copy(alpha = 0.22f) else Color.Transparent)
+            // Dark themes need a stronger shade for the difference to show.
+            .background(if (opened) Color.Black.copy(alpha = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) 0.5f else 0.22f) else Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

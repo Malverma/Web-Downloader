@@ -5,6 +5,22 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
+import com.webdownloader.data.prefs.ThemeChoice
+import com.webdownloader.ui.theme.swatchColors
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -117,6 +133,9 @@ fun SettingsScreen() {
                     update { it.copy(autoContinue = v) }
                 }
             }
+            item {
+                SliderSetting("Auto-scroll speed", s.autoScrollSpeed, 1..10, 1, { "$it" }) { v -> update { it.copy(autoScrollSpeed = v) } }
+            }
             item { SwitchSetting("Keep screen on", null, s.keepScreenOn) { v -> update { it.copy(keepScreenOn = v) } } }
             item {
                 ListItem(
@@ -182,6 +201,9 @@ fun SettingsScreen() {
 
             item { Section("About") }
             item { ListItem(headlineContent = { Text("Web Downloader") }, supportingContent = { Text("Version ${BuildConfig.VERSION_NAME}") }) }
+
+            item { Section("Themes") }
+            item { ThemePicker(s.theme) { t -> update { it.copy(theme = t) } } }
         }
     }
 
@@ -221,6 +243,56 @@ fun SettingsScreen() {
                 editingRule = null
                 rulesVersion++
             },
+        )
+    }
+}
+
+@Composable
+private fun ThemePicker(selected: ThemeChoice, onSelect: (ThemeChoice) -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        ThemeChoice.entries.chunked(4).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { t -> ThemeSwatch(t, t == selected, Modifier.weight(1f)) { onSelect(t) } }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun ThemeSwatch(theme: ThemeChoice, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val (bg, main, second) = swatchColors(theme)
+    val shape = RoundedCornerShape(14.dp)
+    Column(modifier.clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(shape)
+                .background(bg)
+                .border(
+                    if (selected) 3.dp else 1.dp,
+                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                    shape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(Modifier.fillMaxSize(0.5f).clip(CircleShape).background(main), contentAlignment = Alignment.Center) {
+                if (selected) Icon(Icons.Default.Check, "Selected", tint = bg)
+            }
+            Box(
+                Modifier.align(Alignment.BottomEnd).padding(8.dp).fillMaxSize(0.22f).clip(CircleShape).background(second),
+            )
+        }
+        Text(
+            theme.label,
+            style = MaterialTheme.typography.labelMedium,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }

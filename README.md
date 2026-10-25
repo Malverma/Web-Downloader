@@ -3,13 +3,14 @@
 An Android app for downloading manga chapters, or entire series, from websites and reading them offline.
 
 - **Find manga**: use the **Search** tab (or share a link from Firefox). Tap a result to see its full chapter list and pick which chapters to download: tap rows, use All / None / Not downloaded, or **hold and drag** to select many at once (the list auto-scrolls at the edges).
-- **Library**: shows only manga you have downloaded. Opening one lists just its downloaded chapters, and chapters you have opened are shaded darker. **Get more chapters** goes back to the full list.
+- **Library**: shows only manga you have downloaded. Opening one lists just its downloaded chapters, and chapters you have opened are shaded darker. **Download** opens the full chapter list to get more.
 - **Downloads tab**: one folder per manga with its queued, active, failed and finished chapters, matching the folders on disk.
-- **Offline reader**: vertical continuous scroll, like the website. The end of each chapter has a **Next chapter** card, with optional auto-continue. Reading progress is saved. Left/right arrows in the bottom-right jump to the previous/next downloaded chapter.
+- **Offline reader**: vertical continuous scroll, like the website. The end of each chapter has a **Next chapter** card, with optional auto-continue. Reading progress is saved. Buttons in the bottom-right auto-scroll down (speed set in Settings) and jump to the previous/next downloaded chapter. Very tall webtoon strips are shown in slices so they always render.
 - **Quality**: Original / High (1600px) / Medium (1200px) / Low (900px) / Custom. Set it globally, per book, or per download. Existing downloads can be re-compressed later.
 - **Portable files**: each chapter is saved as a `.cbz` (with `ComicInfo.xml`) in `<Library>/<Book Title>/`. Other readers such as Mihon, Perfect Viewer and Kavita can open these files.
 - **Firefox**: in Firefox for Android, use **Share → Web Downloader** on any manga page to open it in the app.
 - **Search**: the **Search** tab searches Asura Scans, Arena Scans and Flame Comics together. Filter by genre (tap once to include, twice to exclude, three times to clear; e.g. Action + Fantasy but not Romance), minimum rating, and minimum chapter count, and sort by relevance, rating, chapters or title. Tap a result to pick chapters to download.
+- **Themes**: Settings → Themes has 8 color themes: Classic, Purple, Pink, Nebula, Enchanted Forest, Moonlit Abyss, Ocean and Dark.
 - **Site rules**: sites work through automatic detection. A small JSON rule (Settings → Sites) can make detection exact. Rules for `asurascans.com`, `arenascan.com` and `flamecomics.xyz` are built in.
 
 See [`spec.md`](spec.md) for the full design.

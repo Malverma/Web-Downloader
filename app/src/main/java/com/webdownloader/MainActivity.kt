@@ -9,11 +9,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import com.webdownloader.download.Notifications
 import com.webdownloader.ui.AppRoot
 import com.webdownloader.ui.theme.AppTheme
+import kotlinx.coroutines.runBlocking
 
 class MainActivity : ComponentActivity() {
     /** URL shared from Firefox (or another app), consumed by navigation. */
@@ -32,8 +35,12 @@ class MainActivity : ComponentActivity() {
         ) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        val settings = (application as WebDownloaderApp).container.settings
+        // Read once up front so the saved theme is used from the first frame.
+        val initial = runBlocking { settings.current() }
         setContent {
-            AppTheme {
+            val s by settings.flow.collectAsState(initial)
+            AppTheme(s.theme) {
                 AppRoot(sharedUrl = sharedUrl.value, onSharedUrlConsumed = { sharedUrl.value = null })
             }
         }

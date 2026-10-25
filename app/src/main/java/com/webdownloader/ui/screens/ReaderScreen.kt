@@ -3,11 +3,18 @@ package com.webdownloader.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.BitmapFactory
+import android.graphics.BitmapRegionDecoder
+import android.graphics.Rect
+import android.os.Build
+import androidx.compose.foundation.Image
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
@@ -54,13 +62,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -77,8 +90,11 @@ import com.webdownloader.reader.ReaderCache
 import com.webdownloader.ui.EmptyState
 import com.webdownloader.ui.rememberContainer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
@@ -160,7 +176,7 @@ fun ReaderScreen(
                 EmptyState("Can't open chapter", s.message) { Button(onClick = onBack) { Text("Back") } }
             }
             is ReaderState.Ready -> ReaderContent(
-                s, onBackground, settings.autoContinue,
+                s, onBackground, settings.autoContinue, settings.autoScrollSpeed,
                 onBack = onBack, onOpenChapter = onOpenChapter, onReadOnline = onReadOnline,
             )
         }
@@ -172,19 +188,24 @@ private fun ReaderContent(
     s: ReaderState.Ready,
     textColor: Color,
     autoContinue: Boolean,
+    autoScrollSpeed: Int,
     onBack: () -> Unit,
     onOpenChapter: (Long) -> Unit,
     onReadOnline: (String) -> Unit,
 ) {
     val c = rememberContainer()
+    val density = LocalDensity.current
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val pageCount = s.pages.size
-    // Item 0 is the "previous chapter" header, pages follow, then the end card.
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = s.chapter.lastPageRead.coerceIn(0, pageCount - 1) + 1)
+    // Tall webtoon strips are shown in slices; one bitmap that tall can't be drawn by the GPU.
+    val slices = remember(s.pages) { slicesOf(s.pages) }
+    val firstSlice = remember(slices) { IntArray(pageCount).also { a -> slices.indices.reversed().forEach { a[slices[it].page] = it } } }
+    // Item 0 is the "previous chapter" header, page slices follow, then the end card.
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = firstSlice[s.chapter.lastPageRead.coerceIn(0, pageCount - 1)] + 1)
     var showUi by remember { mutableStateOf(false) }
-    val currentPage by remember { derivedStateOf { (listState.firstVisibleItemIndex - 1).coerceIn(0, pageCount - 1) } }
+    val currentPage by remember { derivedStateOf { slices[(listState.firstVisibleItemIndex - 1).coerceIn(0, slices.size - 1)].page } }
     val endVisible by remember { derivedStateOf { listState.layoutInfo.visibleItemsInfo.any { it.key == "end" } } }
     val next by remember(s.next?.id) { s.next?.let { c.chapterDao.observe(it.id) } ?: flowOf(null) }.collectAsState(initial = s.next)
 
@@ -202,6 +223,28 @@ private fun ReaderContent(
         onDispose {
             context.findActivity()?.window?.let {
                 WindowCompat.getInsetsController(it, view).show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
+    // Auto-scroll only ever moves down; it pauses while a finger is on the screen and stops at the end.
+    var autoScroll by remember { mutableStateOf(false) }
+    val dragging by listState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(autoScroll, autoScrollSpeed) {
+        if (!autoScroll) return@LaunchedEffect
+        val pxPerSecond = with(density) { (autoScrollSpeed * 35).dp.toPx() }
+        var last = withFrameNanos { it }
+        while (isActive) {
+            val now = withFrameNanos { it }
+            val dy = pxPerSecond * (now - last) / 1_000_000_000f
+            last = now
+            if (dragging) continue
+            if (!listState.canScrollForward) { autoScroll = false; break }
+            try {
+                listState.scrollBy(dy)
+            } catch (e: CancellationException) {
+                // A tap-to-page scroll interrupted this frame; keep going unless auto-scroll itself was stopped.
+                if (!isActive) throw e
             }
         }
     }
@@ -247,14 +290,19 @@ private fun ReaderContent(
                     Text(s.chapter.label, color = textColor, style = MaterialTheme.typography.titleMedium)
                 }
             }
-            items(pageCount, key = { "p$it" }) { i ->
-                val page = s.pages[i]
-                AsyncImage(
-                    model = ImageRequest.Builder(context).data(page.file).build(),
-                    contentDescription = "Page ${i + 1}",
-                    contentScale = ContentScale.FillWidth,
-                    modifier = Modifier.fillMaxWidth().aspectRatio(page.width.toFloat() / page.height),
-                )
+            items(slices.size, key = { "p${slices[it].page}_${slices[it].top}" }) { i ->
+                val slice = slices[i]
+                val page = s.pages[slice.page]
+                if (slice.whole) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context).data(page.file).build(),
+                        contentDescription = "Page ${slice.page + 1}",
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier.fillMaxWidth().aspectRatio(page.width.toFloat() / page.height),
+                    )
+                } else {
+                    PageSlice(page, slice)
+                }
             }
             item(key = "end") {
                 EndCard(s, next, textColor, onOpenChapter, onReadOnline, onBack) {
@@ -263,18 +311,26 @@ private fun ReaderContent(
             }
         }
 
-        // Always-available chapter arrows (bottom right); they sit above the toolbar when it's shown.
-        if (s.previousDownloaded != null || s.nextDownloaded != null) {
-            Row(
-                Modifier
-                    .align(Alignment.BottomEnd)
-                    .navigationBarsPadding()
-                    .padding(end = 16.dp, bottom = if (showUi) 80.dp else 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+        // Auto-scroll toggle and chapter arrows (bottom right); they sit above the toolbar when it's shown.
+        Row(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = 16.dp, bottom = if (showUi) 80.dp else 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            FilledTonalIconButton(
+                onClick = { autoScroll = !autoScroll },
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = if (autoScroll) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.55f),
+                    contentColor = if (autoScroll) MaterialTheme.colorScheme.onPrimary else Color.White,
+                ),
+                modifier = Modifier.size(48.dp),
             ) {
-                ChapterArrow(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous chapter", s.previousDownloaded) { onOpenChapter(it.id) }
-                ChapterArrow(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next chapter", s.nextDownloaded) { onOpenChapter(it.id) }
+                Icon(Icons.Default.KeyboardDoubleArrowDown, contentDescription = if (autoScroll) "Stop auto-scroll" else "Auto-scroll")
             }
+            ChapterArrow(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous chapter", s.previousDownloaded) { onOpenChapter(it.id) }
+            ChapterArrow(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next chapter", s.nextDownloaded) { onOpenChapter(it.id) }
         }
 
         AnimatedVisibility(visible = showUi, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
@@ -300,7 +356,7 @@ private fun ReaderContent(
                     Text("${currentPage + 1} / $pageCount", style = MaterialTheme.typography.labelMedium)
                     Slider(
                         value = currentPage.toFloat(),
-                        onValueChange = { scope.launch { listState.scrollToItem(it.toInt() + 1) } },
+                        onValueChange = { scope.launch { listState.scrollToItem(firstSlice[it.toInt().coerceIn(0, pageCount - 1)] + 1) } },
                         valueRange = 0f..(pageCount - 1).coerceAtLeast(1).toFloat(),
                         modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                     )
@@ -310,6 +366,51 @@ private fun ReaderContent(
                 }
             }
         }
+    }
+}
+
+/** A vertical band [top, bottom) of a page, in source pixels. */
+private data class Slice(val page: Int, val top: Int, val bottom: Int, val whole: Boolean)
+
+/** Pages up to 2.5x taller than wide stay whole; taller ones are cut into bands about 2x their width. */
+private fun slicesOf(pages: List<ReaderCache.Page>): List<Slice> = pages.flatMapIndexed { i, p ->
+    if (p.height <= p.width * 5 / 2) {
+        listOf(Slice(i, 0, p.height, whole = true))
+    } else {
+        val band = p.width * 2
+        (0 until p.height step band).map { top -> Slice(i, top, minOf(top + band, p.height), whole = false) }
+    }
+}
+
+@Composable
+private fun PageSlice(page: ReaderCache.Page, slice: Slice) {
+    val widthPx = LocalConfiguration.current.screenWidthDp * LocalDensity.current.density
+    var bitmap by remember(page.file, slice.top) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(page.file, slice.top) {
+        bitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                // Only downsample when the source is at least twice the screen width.
+                var sample = 1
+                while (page.width / (sample * 2) >= widthPx) sample *= 2
+                val decoder = if (Build.VERSION.SDK_INT >= 31) BitmapRegionDecoder.newInstance(page.file.absolutePath)
+                else @Suppress("DEPRECATION") BitmapRegionDecoder.newInstance(page.file.absolutePath, false)
+                try {
+                    decoder.decodeRegion(
+                        Rect(0, slice.top, page.width, slice.bottom),
+                        BitmapFactory.Options().apply { inSampleSize = sample },
+                    )?.asImageBitmap()
+                } finally {
+                    decoder.recycle()
+                }
+            }.getOrNull()
+        }
+    }
+    val ratio = page.width.toFloat() / (slice.bottom - slice.top)
+    val b = bitmap
+    if (b != null) {
+        Image(b, contentDescription = null, contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth().aspectRatio(ratio))
+    } else {
+        Spacer(Modifier.fillMaxWidth().aspectRatio(ratio))
     }
 }
 
